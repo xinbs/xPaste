@@ -1,0 +1,12 @@
+{
+  "name": "sync-api",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "go run cmd/main.go",
+    "build": "go build -o bin/sync-api cmd/main.go",
+    "test": "go test ./...",
+    "lint": "golangci-lint run"
+  },
+  "description": "xPaste sync service - Go backend for cross-device synchronization"
+}

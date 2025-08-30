@@ -1,0 +1,20 @@
+{
+  "name": "@xpaste/protocol",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@xpaste/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.3",
+    "@types/node": "^22.15.30"
+  },
+  "description": "Protocol definitions for xPaste (HTTP/WS contracts, events, error codes)"
+}

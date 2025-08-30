@@ -1,0 +1,17 @@
+{
+  "name": "@xpaste/shared-types",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.3",
+    "@types/node": "^22.15.30"
+  },
+  "description": "Shared type definitions for xPaste (TypeScript + Go)"
+}

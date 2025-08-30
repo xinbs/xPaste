@@ -1,0 +1,23 @@
+{
+  "name": "@xpaste/sdk-client",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@xpaste/shared-types": "workspace:*",
+    "@xpaste/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.3",
+    "@types/node": "^22.15.30",
+    "vitest": "^2.0.0"
+  },
+  "description": "Client SDK for xPaste sync service (retry, batching, auth)"
+}
