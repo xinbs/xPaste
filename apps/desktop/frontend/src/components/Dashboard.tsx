@@ -2,20 +2,22 @@ import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/store/auth';
 import { useClipboardStore } from '@/store/clipboard';
 import { useWebSocketStore } from '@/store/websocket';
-import { Copy, Monitor, LogOut, Plus, Trash2, Upload, Play, Pause, X, RefreshCw, Edit2 } from 'lucide-react';
+import { Copy, Monitor, LogOut, Plus, Trash2, Upload, Play, Pause, X, RefreshCw, Edit2, Settings, Search, Type, Image as ImageIcon, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import FileUpload, { FilePreview } from '@/components/FileUpload';
 import WebSocketStatus from '@/components/WebSocketStatus';
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<'clipboard' | 'devices'>('clipboard');
+  const [activeTab, setActiveTab] = useState<'clipboard' | 'quickadd' | 'devices' | 'settings'>('clipboard');
   const [newClipText, setNewClipText] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [editingDevice, setEditingDevice] = useState<string | null>(null);
   const [newDeviceName, setNewDeviceName] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'text' | 'image' | 'file'>('all');
   
-  const { user, devices, currentDevice, logout, fetchDevices, renameDevice, deleteDevice } = useAuthStore();
+  const { user, devices, currentDevice, logout, fetchDevices, renameDevice, deleteDevice, isAuthenticated, registerDevice } = useAuthStore();
   const { 
     items: clipItems, 
     fetchItems: fetchClipItems, 
@@ -158,251 +160,298 @@ export default function Dashboard() {
     return new Date(dateString).toLocaleString('zh-CN');
   };
 
-  const renderClipboardTab = () => (
-    <div className="space-y-4">
-      {/* 剪贴板监控控制 */}
-      <div className="bg-white rounded-lg shadow p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <div className={cn(
-              "w-2 h-2 rounded-full",
-              isMonitoring ? "bg-green-500" : "bg-gray-400"
-            )} />
-            <span className="text-sm text-gray-600">
-              剪贴板监控: {isMonitoring ? '运行中' : '已停止'}
-            </span>
-          </div>
-          <button
-            onClick={toggleMonitoring}
-            className={cn(
-              "px-3 py-1 rounded-md text-sm flex items-center space-x-2",
-              isMonitoring 
-                ? "bg-red-100 text-red-700 hover:bg-red-200" 
-                : "bg-green-100 text-green-700 hover:bg-green-200"
-            )}
-          >
-            {isMonitoring ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-            {isMonitoring ? '停止' : '开始'}
-          </button>
-        </div>
-      </div>
+  // 过滤剪贴板项
+  const filteredClipItems = clipItems.filter(item => {
+    const matchesSearch = !searchQuery || 
+      item.content?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.file_path?.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesType = typeFilter === 'all' || item.type === typeFilter;
+    
+    return matchesSearch && matchesType;
+  });
 
-      {/* 错误提示 */}
-      {clipError && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-red-700 text-sm">{clipError}</p>
+  const renderClipboardTab = () => {
+    return (
+      <div className="h-full flex flex-col">
+        {/* 顶部控制栏 */}
+        <div className="p-4 border-b border-gray-200 bg-white">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-3">
+              <h2 className="text-xl font-semibold text-gray-900">剪贴板历史</h2>
+              <div className="flex items-center space-x-2">
+                <div className={cn(
+                  "w-2 h-2 rounded-full",
+                  isMonitoring ? "bg-green-500" : "bg-gray-400"
+                )} />
+                <span className="text-sm text-gray-600">
+                  {isMonitoring ? '监控中' : '已停止'}
+                </span>
+              </div>
+            </div>
             <button
-              onClick={clearError}
-              className="text-red-500 hover:text-red-700"
-            >
-              ×
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 添加新项 */}
-      <div className="bg-white rounded-lg shadow p-4">
-        <h3 className="text-lg font-medium text-gray-900 mb-3">添加剪贴板项</h3>
-        <div className="space-y-3">
-          <div className="flex space-x-2">
-            <textarea
-              value={newClipText}
-              onChange={(e) => setNewClipText(e.target.value)}
-              placeholder="输入要同步的文本内容..."
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              rows={3}
-            />
-            <button
-              onClick={handleAddTextItem}
-              disabled={!newClipText.trim()}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-1"
-            >
-              <Plus className="w-4 h-4" />
-              <span>添加文本</span>
-            </button>
-          </div>
-          
-          <div className="flex space-x-2">
-            <button
-              onClick={() => setShowFileUpload(!showFileUpload)}
-              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center space-x-2"
-            >
-              <Upload className="w-4 h-4" />
-              <span>上传文件</span>
-            </button>
-          </div>
-          
-          {/* 文件上传区域 */}
-          {showFileUpload && (
-            <div className="border-t pt-3">
-              {!selectedFile ? (
-                <FileUpload onFileSelect={handleFileSelect} />
-              ) : (
-                <div className="space-y-3">
-                  <FilePreview 
-                    file={selectedFile} 
-                    onRemove={() => setSelectedFile(null)} 
-                  />
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={handleFileUpload}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                    >
-                      确认上传
-                    </button>
-                    <button
-                      onClick={() => {
-                        setSelectedFile(null);
-                        setShowFileUpload(false);
-                      }}
-                      className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
-                    >
-                      取消
-                    </button>
-                  </div>
-                </div>
+              onClick={toggleMonitoring}
+              className={cn(
+                "px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2 transition-colors",
+                isMonitoring 
+                  ? "bg-red-100 text-red-700 hover:bg-red-200" 
+                  : "bg-green-100 text-green-700 hover:bg-green-200"
               )}
+            >
+              {isMonitoring ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+              {isMonitoring ? '停止监控' : '开始监控'}
+            </button>
+          </div>
+          
+          {/* 搜索和过滤 */}
+          <div className="flex items-center space-x-4">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <input
+                type="text"
+                placeholder="搜索剪贴板内容..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as any)}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="all">所有类型</option>
+              <option value="text">文本</option>
+              <option value="image">图片</option>
+              <option value="file">文件</option>
+            </select>
+          </div>
+        </div>
+
+        {/* 错误提示 */}
+        {clipError && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-red-700 text-sm">{clipError}</p>
+              <button
+                onClick={clearError}
+                className="text-red-500 hover:text-red-700"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 主内容区域 */}
+        <div className="flex-1 overflow-y-auto p-2">
+          {clipboardLoading ? (
+            <div className="flex items-center justify-center h-64">
+              <div className="text-center">
+                <RefreshCw className="w-8 h-8 animate-spin text-blue-500 mx-auto mb-2" />
+                <p className="text-gray-500">加载中...</p>
+              </div>
+            </div>
+          ) : filteredClipItems.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-gray-500">
+              <div className="text-6xl mb-4">📋</div>
+              <p className="text-lg font-medium mb-2">暂无剪贴板记录</p>
+              <p className="text-sm">{searchQuery || typeFilter !== 'all' ? '没有匹配的记录' : '开始监控剪贴板或手动添加内容'}</p>
+            </div>
+          ) : (
+            <div className="grid gap-2">
+                {filteredClipItems.map((item) => (
+                  <div key={item.id} className="bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all duration-200 group">
+                    <div className="p-3">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center space-x-2 mb-2">
+                            <div className="flex items-center space-x-2">
+                              {item.type === 'text' && <Type className="w-4 h-4 text-blue-500" />}
+                              {item.type === 'image' && <ImageIcon className="w-4 h-4 text-green-500" />}
+                              {item.type === 'file' && <FileText className="w-4 h-4 text-purple-500" />}
+                              <span className={cn(
+                                "text-xs font-medium px-2 py-1 rounded-full",
+                                item.type === 'text' ? "bg-blue-50 text-blue-700" :
+                                item.type === 'image' ? "bg-green-50 text-green-700" :
+                                "bg-purple-50 text-purple-700"
+                              )}>
+                                {item.type === 'text' ? '文本' : 
+                                 item.type === 'image' ? '图片' : '文件'}
+                              </span>
+                            </div>
+                            {item.device_name && (
+                              <span className="text-xs text-gray-500">
+                                来自: {item.device_name}
+                              </span>
+                            )}
+                            <span className="text-xs text-gray-400">
+                              {formatDate(item.created_at)}
+                            </span>
+                          </div>
+                          
+                          {item.type === 'text' && (
+                            <p className="text-sm text-gray-900 break-all line-clamp-3">
+                              {item.content}
+                            </p>
+                          )}
+                          
+                          {item.type === 'image' && (
+                            <div className="space-y-2">
+                              <div className="flex items-center space-x-2">
+                                <span className="text-gray-600">图片预览:</span>
+                                {item.metadata?.size && (
+                                  <span className="text-xs text-gray-500">
+                                    ({Math.round(item.metadata.size / 1024)}KB)
+                                  </span>
+                                )}
+                              </div>
+                              {item.content && (
+                                <div className="relative inline-block">
+                                  <img 
+                                    src={item.content} 
+                                    alt="剪贴板图片" 
+                                    className="max-w-full max-h-32 object-contain rounded border cursor-pointer hover:opacity-80 transition-opacity"
+                                    onClick={() => {
+                                      // 在新窗口中打开完整图片
+                                      const newWindow = window.open();
+                                      if (newWindow) {
+                                        newWindow.document.write(`
+                                          <html>
+                                            <head><title>图片预览</title></head>
+                                            <body style="margin:0;padding:20px;background:#f5f5f5;display:flex;justify-content:center;align-items:center;min-height:100vh;">
+                                              <img src="${item.content}" style="max-width:100%;max-height:100%;object-fit:contain;" />
+                                            </body>
+                                          </html>
+                                        `);
+                                      }
+                                    }}
+                                    title="点击查看完整图片"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          
+                          {item.type === 'file' && (
+                            <div className="flex items-center space-x-2">
+                              <span className="text-sm text-gray-900 truncate italic">
+                                {item.file_path || '文件内容'}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div className="flex items-center space-x-1 ml-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {item.type === 'text' && item.content && (
+                            <button
+                              onClick={() => handleCopyItem(item.content!)}
+                              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="复制到剪贴板"
+                            >
+                              <Copy className="w-4 h-4" />
+                            </button>
+                          )}
+                          {item.type === 'image' && item.content && (
+                            <button
+                              onClick={async () => {
+                                try {
+                                  // 将base64图片转换为Blob
+                                  const response = await fetch(item.content!);
+                                  const blob = await response.blob();
+                                  
+                                  // 复制图片到剪贴板
+                                  await navigator.clipboard.write([
+                                    new ClipboardItem({ [blob.type]: blob })
+                                  ]);
+                                  
+                                  // 可以显示成功提示
+                                  console.log('图片已复制到剪贴板');
+                                } catch (error) {
+                                  console.error('复制图片失败:', error);
+                                }
+                              }}
+                              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="复制图片"
+                            >
+                              <Copy className="w-4 h-4" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleDeleteItem(item.id)}
+                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="删除"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
             </div>
           )}
         </div>
       </div>
-
-      {/* 剪贴板历史 */}
-      <div className="bg-white rounded-lg shadow">
-        <div className="px-4 py-3 border-b border-gray-200">
-          <h3 className="text-lg font-medium text-gray-900">剪贴板历史</h3>
-        </div>
-        <div className="divide-y divide-gray-200">
-          {clipboardLoading ? (
-            <div className="p-4 text-center text-gray-500">加载中...</div>
-          ) : clipItems.length === 0 ? (
-            <div className="p-4 text-center text-gray-500">暂无剪贴板历史</div>
-          ) : (
-            clipItems.map((item) => (
-              <div key={item.id} className="p-4 hover:bg-gray-50">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center space-x-2 mb-2">
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                        {item.type}
-                      </span>
-                      {item.device_name && (
-                        <span className="text-xs text-gray-500">
-                          来自: {item.device_name}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-sm text-gray-900 break-words">
-                      {item.type === 'text' ? (
-                        <p>{item.content}</p>
-                      ) : item.type === 'image' ? (
-                        <div className="space-y-2">
-                          <div className="flex items-center space-x-2">
-                            <span className="text-gray-600">图片预览:</span>
-                            {item.metadata?.size && (
-                              <span className="text-xs text-gray-500">
-                                ({Math.round(item.metadata.size / 1024)}KB)
-                              </span>
-                            )}
-                          </div>
-                          {item.content && (
-                            <div className="relative inline-block">
-                              <img 
-                                src={item.content} 
-                                alt="剪贴板图片" 
-                                className="max-w-xs max-h-32 rounded-lg border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity"
-                                onClick={() => {
-                                  // 在新窗口中打开完整图片
-                                  const newWindow = window.open();
-                                  if (newWindow) {
-                                    newWindow.document.write(`
-                                      <html>
-                                        <head><title>图片预览</title></head>
-                                        <body style="margin:0;padding:20px;background:#f5f5f5;display:flex;justify-content:center;align-items:center;min-height:100vh;">
-                                          <img src="${item.content}" style="max-width:100%;max-height:100%;object-fit:contain;" />
-                                        </body>
-                                      </html>
-                                    `);
-                                  }
-                                }}
-                                title="点击查看完整图片"
-                              />
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="italic text-gray-500">
-                          {item.file_path || '文件内容'}
-                        </p>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {formatDate(item.created_at)}
-                    </p>
-                  </div>
-                  <div className="flex items-center space-x-2 ml-4">
-                    {item.type === 'text' && item.content && (
-                      <button
-                        onClick={() => handleCopyItem(item.content!)}
-                        className="p-1 text-gray-400 hover:text-gray-600"
-                        title="复制文本"
-                      >
-                        <Copy className="w-4 h-4" />
-                      </button>
-                    )}
-                    {item.type === 'image' && item.content && (
-                      <button
-                        onClick={async () => {
-                          try {
-                            // 将base64图片转换为Blob
-                            const response = await fetch(item.content!);
-                            const blob = await response.blob();
-                            
-                            // 复制图片到剪贴板
-                            await navigator.clipboard.write([
-                              new ClipboardItem({ [blob.type]: blob })
-                            ]);
-                            
-                            // 可以显示成功提示
-                            console.log('图片已复制到剪贴板');
-                          } catch (error) {
-                            console.error('复制图片失败:', error);
-                          }
-                        }}
-                        className="p-1 text-gray-400 hover:text-gray-600"
-                        title="复制图片"
-                      >
-                        <Copy className="w-4 h-4" />
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleDeleteItem(item.id)}
-                      className="p-1 text-gray-400 hover:text-red-600"
-                      title="删除"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-    </div>
-  );
+    );
+  };
 
   const renderDevicesTab = () => {
-    const { onlineDevices } = useWebSocketStore();
+    console.log('Rendering devices tab - devices:', devices);
+    console.log('Rendering devices tab - onlineDevices:', onlineDevices);
+    console.log('Current user:', user);
+    console.log('Is authenticated:', isAuthenticated);
+    console.log('Current device:', currentDevice);
     
     const isDeviceOnline = (deviceId: string) => {
       return onlineDevices.includes(deviceId);
     };
 
     const handleRefreshDevices = async () => {
+      console.log('刷新设备列表被点击');
+      console.log('当前设备数量:', devices.length);
+      console.log('当前设备列表:', devices);
       await fetchDevices();
+      console.log('刷新后设备数量:', devices.length);
+    };
+
+    const handleRegisterDevice = async () => {
+      console.log('注册设备按钮被点击');
+      try {
+        console.log('开始导入设备相关模块...');
+        const { getDeviceName, getDevicePlatform } = await import('../lib/device');
+        const { getOrCreateDeviceId } = await import('../lib/device');
+        const deviceId = getOrCreateDeviceId();
+        console.log('设备ID:', deviceId);
+        
+        const deviceInfo = {
+          device_id: deviceId,
+          name: getDeviceName(),
+          platform: getDevicePlatform(),
+          version: '1.0.0',
+          capabilities: {
+            clipboard_read: true,
+            clipboard_write: true,
+            file_upload: true,
+            image_ocr: false,
+            notifications: true,
+            websocket: true
+          }
+        };
+        
+        console.log('准备注册设备:', deviceInfo);
+        const success = await registerDevice(deviceInfo);
+        console.log('注册结果:', success);
+        
+        if (success) {
+          console.log('注册成功，刷新设备列表...');
+          await fetchDevices();
+        } else {
+          console.log('注册失败');
+        }
+      } catch (error) {
+        console.error('注册设备时发生错误:', error);
+      }
     };
 
     const handleRenameDevice = async (deviceId: string) => {
@@ -436,52 +485,79 @@ export default function Dashboard() {
     };
 
     return (
-      <div className="space-y-6">
-        {/* 设备统计 */}
-        <div className="bg-white rounded-lg shadow">
-          <div className="px-4 py-3 border-b border-gray-200">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-medium text-gray-900">设备管理</h3>
+      <div className="h-full flex flex-col">
+        {/* 顶部控制栏 */}
+        <div className="p-4 border-b border-gray-200 bg-white">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-3">
+              <h2 className="text-xl font-semibold text-gray-900">设备管理</h2>
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 rounded-full bg-blue-500" />
+                <span className="text-sm text-gray-600">
+                  {devices.length} 台设备
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2">
               <button
                 onClick={handleRefreshDevices}
-                className="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                className="px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2 transition-colors bg-blue-100 text-blue-700 hover:bg-blue-200"
               >
-                <RefreshCw className="w-3 h-3 mr-1" />
-                刷新
+                <RefreshCw className="w-4 h-4" />
+                刷新设备
+              </button>
+              <button
+                onClick={(e) => {
+                  console.log('按钮点击事件触发', e);
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleRegisterDevice();
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2 transition-colors bg-green-100 text-green-700 hover:bg-green-200 cursor-pointer"
+                type="button"
+              >
+                <Plus className="w-4 h-4" />
+                注册当前设备
               </button>
             </div>
           </div>
-          <div className="px-4 py-3">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-blue-50 rounded-lg p-3">
-                <div className="flex items-center">
-                  <Monitor className="w-5 h-5 text-blue-600" />
-                  <div className="ml-3">
-                    <p className="text-sm font-medium text-blue-900">总设备数</p>
-                    <p className="text-lg font-semibold text-blue-600">{devices.length}</p>
-                  </div>
+          
+          {/* 设备统计卡片 */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg p-4 border border-blue-200">
+              <div className="flex items-center">
+                <div className="p-2 bg-blue-500 rounded-lg">
+                  <Monitor className="w-5 h-5 text-white" />
+                </div>
+                <div className="ml-3">
+                  <p className="text-sm font-medium text-blue-900">总设备数</p>
+                  <p className="text-2xl font-bold text-blue-700">{devices.length}</p>
                 </div>
               </div>
-              <div className="bg-green-50 rounded-lg p-3">
-                <div className="flex items-center">
-                  <div className="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center">
-                    <div className="w-2 h-2 bg-white rounded-full"></div>
-                  </div>
-                  <div className="ml-3">
-                    <p className="text-sm font-medium text-green-900">在线设备</p>
-                    <p className="text-lg font-semibold text-green-600">{onlineDevices.length}</p>
+            </div>
+            <div className="bg-gradient-to-r from-green-50 to-green-100 rounded-lg p-4 border border-green-200">
+              <div className="flex items-center">
+                <div className="p-2 bg-green-500 rounded-lg">
+                  <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
+                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                   </div>
                 </div>
+                <div className="ml-3">
+                  <p className="text-sm font-medium text-green-900">在线设备</p>
+                  <p className="text-2xl font-bold text-green-700">{onlineDevices.length}</p>
+                </div>
               </div>
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="flex items-center">
-                  <div className="w-5 h-5 bg-gray-400 rounded-full flex items-center justify-center">
-                    <div className="w-2 h-2 bg-white rounded-full"></div>
+            </div>
+            <div className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg p-4 border border-gray-200">
+              <div className="flex items-center">
+                <div className="p-2 bg-gray-500 rounded-lg">
+                  <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
+                    <div className="w-2 h-2 bg-gray-500 rounded-full"></div>
                   </div>
-                  <div className="ml-3">
-                    <p className="text-sm font-medium text-gray-900">离线设备</p>
-                    <p className="text-lg font-semibold text-gray-600">{devices.length - onlineDevices.length}</p>
-                  </div>
+                </div>
+                <div className="ml-3">
+                  <p className="text-sm font-medium text-gray-900">离线设备</p>
+                  <p className="text-2xl font-bold text-gray-700">{devices.length - onlineDevices.length}</p>
                 </div>
               </div>
             </div>
@@ -489,131 +565,223 @@ export default function Dashboard() {
         </div>
 
         {/* 设备列表 */}
-        <div className="bg-white rounded-lg shadow">
-          <div className="px-4 py-3 border-b border-gray-200">
-            <h4 className="text-md font-medium text-gray-900">设备列表</h4>
-          </div>
-          <div className="divide-y divide-gray-200">
-            {devices.length === 0 ? (
-              <div className="p-8 text-center">
-                <Monitor className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-500 text-sm">暂无设备</p>
-                <p className="text-gray-400 text-xs mt-1">请先注册设备以开始使用</p>
-              </div>
-            ) : (
-              devices.map((device) => {
-                const online = isDeviceOnline(device.id);
+        <div className="flex-1 overflow-y-auto p-4">
+          {devices.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-gray-500">
+              <div className="text-6xl mb-4">💻</div>
+              <p className="text-lg font-medium mb-2">暂无设备</p>
+              <p className="text-sm">请先注册设备以开始使用</p>
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {devices.map((device) => {
+                const online = isDeviceOnline(device.device_id);
                 return (
-                  <div key={device.id} className="p-4 hover:bg-gray-50 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-4">
-                        <div className="relative">
-                          <Monitor className={cn(
-                            "w-8 h-8",
-                            online ? "text-green-500" : "text-gray-400"
-                          )} />
-                          <div className={cn(
-                            "absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-white",
-                            online ? "bg-green-500" : "bg-gray-400"
-                          )}></div>
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center space-x-2 mb-1">
-                            {editingDevice === device.id ? (
-                              <div className="flex items-center space-x-2">
-                                <input
-                                  type="text"
-                                  value={newDeviceName}
-                                  onChange={(e) => setNewDeviceName(e.target.value)}
-                                  className="text-sm font-medium text-gray-900 bg-white border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                  onKeyPress={(e) => {
-                                    if (e.key === 'Enter') {
-                                      handleRenameDevice(device.id);
-                                    } else if (e.key === 'Escape') {
-                                      cancelEditDevice();
-                                    }
-                                  }}
-                                  autoFocus
-                                />
-                                <button
-                                  onClick={() => handleRenameDevice(device.id)}
-                                  className="text-green-600 hover:text-green-800"
-                                  title="确认"
-                                >
-                                  ✓
-                                </button>
-                                <button
-                                  onClick={cancelEditDevice}
-                                  className="text-gray-600 hover:text-gray-800"
-                                  title="取消"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            ) : (
-                              <p className="text-sm font-medium text-gray-900">
-                                {device.name}
-                              </p>
-                            )}
-                            {device.is_current && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                当前设备
-                              </span>
-                            )}
-                            <span className={cn(
-                              "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
-                              online 
-                                ? "bg-green-100 text-green-800" 
-                                : "bg-gray-100 text-gray-800"
+                  <div key={device.id} className="bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all duration-200 group">
+                    <div className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-4">
+                          <div className="relative">
+                            <div className={cn(
+                              "p-3 rounded-lg",
+                              online ? "bg-green-100" : "bg-gray-100"
                             )}>
-                              {online ? "在线" : "离线"}
-                            </span>
+                              <Monitor className={cn(
+                                "w-6 h-6",
+                                online ? "text-green-600" : "text-gray-400"
+                              )} />
+                            </div>
+                            <div className={cn(
+                              "absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-white flex items-center justify-center",
+                              online ? "bg-green-500" : "bg-gray-400"
+                            )}>
+                              <div className="w-2 h-2 bg-white rounded-full"></div>
+                            </div>
                           </div>
-                          <div className="flex items-center space-x-4 text-xs text-gray-500">
-                            <span>{device.platform}</span>
-                            <span>•</span>
-                            <span>{device.version}</span>
-                            <span>•</span>
-                            <span>最后活跃: {formatDate(device.last_seen)}</span>
-                          </div>
-                          <div className="flex flex-wrap gap-1 mt-2">
-                            {Object.entries(device.capabilities)
-                              .filter(([_, enabled]) => enabled)
-                              .map(([cap, _]) => (
-                              <span
-                                key={cap}
-                                className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700"
-                              >
-                                {cap.replace('_', ' ')}
-                              </span>
-                            ))}
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-3 mb-2">
+                              {editingDevice === device.id ? (
+                                <div className="flex items-center space-x-2">
+                                  <input
+                                    type="text"
+                                    value={newDeviceName}
+                                    onChange={(e) => setNewDeviceName(e.target.value)}
+                                    className="text-lg font-semibold text-gray-900 bg-white border border-gray-300 rounded-lg px-3 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    onKeyPress={(e) => {
+                                      if (e.key === 'Enter') {
+                                        handleRenameDevice(device.id);
+                                      } else if (e.key === 'Escape') {
+                                        cancelEditDevice();
+                                      }
+                                    }}
+                                    autoFocus
+                                  />
+                                  <button
+                                    onClick={() => handleRenameDevice(device.id)}
+                                    className="p-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
+                                    title="确认"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    onClick={cancelEditDevice}
+                                    className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors"
+                                    title="取消"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : (
+                                <>
+                                  <h4 className="text-lg font-semibold text-gray-900">{device.name}</h4>
+                                  {device.is_current && (
+                                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                      当前设备
+                                    </span>
+                                  )}
+                                  <span className={cn(
+                                    "inline-flex items-center px-3 py-1 rounded-full text-xs font-medium",
+                                    online 
+                                      ? "bg-green-100 text-green-800" 
+                                      : "bg-gray-100 text-gray-800"
+                                  )}>
+                                    {online ? '在线' : '离线'}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                            <div className="flex items-center space-x-4 text-sm text-gray-500 mb-2">
+                              <span>{device.platform}</span>
+                              <span>•</span>
+                              <span>{device.version}</span>
+                              <span>•</span>
+                              <span>最后活跃: {formatDate(device.last_seen)}</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {Object.entries(device.capabilities)
+                                .filter(([_, enabled]) => enabled)
+                                .map(([cap, _]) => (
+                                <span
+                                  key={cap}
+                                  className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700"
+                                >
+                                  {cap.replace('_', ' ')}
+                                </span>
+                              ))}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        {!device.is_current && editingDevice !== device.id && (
-                          <>
-                            <button
-                              onClick={() => startEditDevice(device)}
-                              className="inline-flex items-center px-2 py-1 border border-gray-300 shadow-sm text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                              title="重命名设备"
-                            >
-                              <Edit2 className="w-3 h-3" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteDevice(device.id)}
-                              className="inline-flex items-center px-2 py-1 border border-red-300 shadow-sm text-xs font-medium rounded text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-                              title="删除设备"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </>
-                        )}
+                        <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {!device.is_current && editingDevice !== device.id && (
+                            <>
+                              <button
+                                onClick={() => startEditDevice(device)}
+                                className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                title="重命名设备"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteDevice(device.id)}
+                                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                title="删除设备"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
                 );
-              })
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderQuickAddTab = () => {
+    return (
+      <div className="p-6">
+        <div className="border-b border-gray-200 pb-4 mb-6">
+          <h2 className="text-xl font-bold text-gray-900">快速添加</h2>
+          <p className="text-gray-600 mt-1">手动添加文本和文件到剪贴板</p>
+        </div>
+
+        {/* 错误提示 */}
+        {clipError && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+            <div className="flex items-center justify-between">
+              <p className="text-red-700 text-sm">{clipError}</p>
+              <button
+                onClick={clearError}
+                className="text-red-500 hover:text-red-700"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 文本添加区域 */}
+        <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+            <Type className="w-5 h-5 mr-2" />
+            添加文本
+          </h3>
+          <div className="space-y-4">
+            <textarea
+              value={newClipText}
+              onChange={(e) => setNewClipText(e.target.value)}
+              placeholder="输入要添加到剪贴板的文本内容..."
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+              rows={6}
+            />
+            <div className="flex justify-end">
+              <button
+                onClick={handleAddTextItem}
+                disabled={!newClipText.trim()}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed font-medium"
+              >
+                添加到剪贴板
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 文件上传区域 */}
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+            <Upload className="w-5 h-5 mr-2" />
+            上传文件
+          </h3>
+          <div className="space-y-4">
+            {!selectedFile ? (
+              <FileUpload onFileSelect={handleFileSelect} />
+            ) : (
+              <div className="space-y-2">
+                <FilePreview 
+                  file={selectedFile} 
+                  onRemove={() => setSelectedFile(null)} 
+                />
+                <div className="flex space-x-3">
+                  <button
+                    onClick={handleFileUpload}
+                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                  >
+                    确认上传
+                  </button>
+                  <button
+                    onClick={() => setSelectedFile(null)}
+                    className="px-6 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 font-medium"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -621,61 +789,221 @@ export default function Dashboard() {
     );
   };
 
+  const renderSettingsTab = () => {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="border-b border-gray-200 pb-4">
+          <h2 className="text-2xl font-bold text-gray-900">应用设置</h2>
+          <p className="text-gray-600 mt-1">管理您的 xPaste 应用程序设置</p>
+        </div>
 
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      {/* 顶部导航 */}
-      <nav className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center">
-              <h1 className="text-xl font-semibold text-gray-900">xPaste</h1>
-            </div>
-            <div className="flex items-center space-x-4">
-              <WebSocketStatus />
-              <span className="text-sm text-gray-700">欢迎, {user?.username}</span>
+        {/* 剪贴板设置 */}
+        <div className="bg-gray-50 rounded-lg p-4">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+            <Copy className="w-5 h-5 mr-2" />
+            剪贴板设置
+          </h3>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm font-medium text-gray-700">自动监控剪贴板</label>
+                <p className="text-xs text-gray-500">启动时自动开始监控剪贴板变化</p>
+              </div>
               <button
-                onClick={logout}
-                className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                className={cn(
+                  "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
+                  isMonitoring ? "bg-blue-600" : "bg-gray-200"
+                )}
+                onClick={() => isMonitoring ? stopMonitoring() : startMonitoring()}
               >
-                <LogOut className="w-4 h-4 mr-2" />
-                退出
+                <span
+                  className={cn(
+                    "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                    isMonitoring ? "translate-x-6" : "translate-x-1"
+                  )}
+                />
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm font-medium text-gray-700">历史记录数量限制</label>
+                <p className="text-xs text-gray-500">最多保存的剪贴板历史记录数量</p>
+              </div>
+              <select className="px-3 py-1 border border-gray-300 rounded-md text-sm">
+                <option value="50">50 条</option>
+                <option value="100">100 条</option>
+                <option value="200">200 条</option>
+                <option value="500">500 条</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* 连接设置 */}
+        <div className="bg-gray-50 rounded-lg p-4">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+            <Monitor className="w-5 h-5 mr-2" />
+            连接设置
+          </h3>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm font-medium text-gray-700">WebSocket 连接状态</label>
+                <p className="text-xs text-gray-500">与服务器的实时连接状态</p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <div className={cn(
+                  "w-2 h-2 rounded-full",
+                  isConnected ? "bg-green-500" : "bg-red-500"
+                )} />
+                <span className="text-sm text-gray-600">
+                  {isConnected ? "已连接" : "未连接"}
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm font-medium text-gray-700">自动重连</label>
+                <p className="text-xs text-gray-500">连接断开时自动尝试重连</p>
+              </div>
+              <button
+                className="relative inline-flex h-6 w-11 items-center rounded-full bg-blue-600 transition-colors"
+              >
+                <span className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-6" />
               </button>
             </div>
           </div>
         </div>
-      </nav>
 
-      <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
+        {/* 界面设置 */}
+        <div className="bg-gray-50 rounded-lg p-4">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+            <Settings className="w-5 h-5 mr-2" />
+            界面设置
+          </h3>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm font-medium text-gray-700">主题模式</label>
+                <p className="text-xs text-gray-500">选择应用程序的外观主题</p>
+              </div>
+              <select className="px-3 py-1 border border-gray-300 rounded-md text-sm">
+                <option value="light">浅色模式</option>
+                <option value="dark">深色模式</option>
+                <option value="auto">跟随系统</option>
+              </select>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm font-medium text-gray-700">启动时最小化到托盘</label>
+                <p className="text-xs text-gray-500">应用启动时自动最小化到系统托盘</p>
+              </div>
+              <button
+                className="relative inline-flex h-6 w-11 items-center rounded-full bg-gray-200 transition-colors"
+              >
+                <span className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-1" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 数据管理 */}
+        <div className="bg-gray-50 rounded-lg p-4">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+            <Trash2 className="w-5 h-5 mr-2" />
+            数据管理
+          </h3>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm font-medium text-gray-700">清空剪贴板历史</label>
+                <p className="text-xs text-gray-500">删除所有保存的剪贴板历史记录</p>
+              </div>
+              <button className="px-4 py-2 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors">
+                清空历史
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm font-medium text-gray-700">导出数据</label>
+                <p className="text-xs text-gray-500">将剪贴板历史导出为文件</p>
+              </div>
+              <button className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors">
+                导出数据
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 关于信息 */}
+        <div className="bg-gray-50 rounded-lg p-4">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">关于 xPaste</h3>
+          <div className="space-y-2 text-sm text-gray-600">
+            <p><span className="font-medium">版本:</span> 1.0.0</p>
+            <p><span className="font-medium">作者:</span> xPaste Team</p>
+            <p><span className="font-medium">描述:</span> 跨设备剪贴板同步工具</p>
+            <div className="pt-2">
+              <button className="text-blue-600 hover:text-blue-800 text-sm underline">
+                检查更新
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto py-3 sm:px-6 lg:px-8">
+        <div className="px-4 py-3 sm:px-0">
           {/* 标签页导航 */}
-          <div className="border-b border-gray-200 mb-6">
-            <nav className="-mb-px flex space-x-8">
+          <div className="border-b border-gray-200 mb-4">
+            <nav className="-mb-px flex justify-between items-center">
+              <div className="flex space-x-6">
               {[
-                { key: 'clipboard', label: '剪贴板', icon: Copy },
-                { key: 'devices', label: '设备', icon: Monitor },
-              ].map(({ key, label, icon: Icon }) => (
+                { key: 'clipboard', label: '剪贴板历史', icon: Copy, description: '查看和管理剪贴板内容' },
+                { key: 'quickadd', label: '快速添加', icon: Plus, description: '手动添加文本和文件到剪贴板' },
+                { key: 'devices', label: '设备管理', icon: Monitor, description: '管理连接的设备' },
+                { key: 'settings', label: '设置', icon: Settings, description: '应用程序设置' },
+              ].map(({ key, label, icon: Icon, description }) => (
                 <button
                   key={key}
                   onClick={() => setActiveTab(key as any)}
                   className={cn(
-                    "flex items-center space-x-2 py-2 px-1 border-b-2 font-medium text-sm",
+                    "flex items-center space-x-2 py-2 px-3 border-b-2 font-medium text-sm rounded-t-lg transition-all duration-200",
                     activeTab === key
-                      ? "border-blue-500 text-blue-600"
-                      : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                      ? "border-blue-500 text-blue-600 bg-blue-50"
+                      : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 hover:bg-gray-50"
                   )}
+                  title={description}
                 >
                   <Icon className="w-4 h-4" />
                   <span>{label}</span>
                 </button>
               ))}
+              </div>
+              <div className="flex items-center space-x-3">
+                <WebSocketStatus />
+                <span className="text-sm text-gray-700">欢迎, {user?.username}</span>
+                <button
+                  onClick={logout}
+                  className="inline-flex items-center px-2 py-1 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                >
+                  <LogOut className="w-4 h-4 mr-1" />
+                  退出
+                </button>
+              </div>
             </nav>
           </div>
 
           {/* 标签页内容 */}
-          {activeTab === 'clipboard' && renderClipboardTab()}
-          {activeTab === 'devices' && renderDevicesTab()}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 min-h-[600px]">
+            {activeTab === 'clipboard' && renderClipboardTab()}
+            {activeTab === 'quickadd' && renderQuickAddTab()}
+            {activeTab === 'devices' && renderDevicesTab()}
+            {activeTab === 'settings' && renderSettingsTab()}
+          </div>
         </div>
       </div>
     </div>

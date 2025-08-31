@@ -163,7 +163,7 @@ class ApiClient {
       success: boolean;
       message: string;
       data: { items: any[]; pagination: any };
-    }>('/devices', {
+    }>('/devices?page=1&limit=100', {
       signal,
     });
   }

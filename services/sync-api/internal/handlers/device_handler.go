@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -136,6 +137,9 @@ func (h *DeviceHandler) GetDevices(c *gin.Context) {
 		return
 	}
 
+	// 添加调试日志
+	fmt.Printf("[DEBUG] GetDevices called for userID: %v\n", userID)
+
 	// 解析分页参数
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
@@ -150,6 +154,8 @@ func (h *DeviceHandler) GetDevices(c *gin.Context) {
 	platform := c.Query("platform")
 	status := c.Query("status")
 	onlineOnly := c.Query("online_only") == "true"
+
+	fmt.Printf("[DEBUG] Query params - page: %d, limit: %d, platform: %s, status: %s, onlineOnly: %v\n", page, limit, platform, status, onlineOnly)
 
 	params := &models.PaginationParams{
 		Page:     page,
@@ -186,7 +192,8 @@ func (h *DeviceHandler) GetDevices(c *gin.Context) {
 		}
 		total = int64(len(devices))
 	} else {
-		devices, pagination, err := h.deviceService.GetUserDevices(userID.(uint), params)
+		var pagination *models.PaginationResponse
+		devices, pagination, err = h.deviceService.GetUserDevices(userID.(uint), params)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, models.ErrorResponse("Failed to get user devices: "+err.Error()))
 			return
@@ -217,9 +224,14 @@ func (h *DeviceHandler) GetDevices(c *gin.Context) {
 
 	// 转换为响应格式
 	deviceResponses := make([]models.DeviceResponse, len(devices))
+	fmt.Printf("[DEBUG] Converting %d devices to response format\n", len(devices))
 	for i, device := range devices {
-		deviceResponses[i] = *device.ToResponse()
+		deviceResponse := device.ToResponse()
+		fmt.Printf("[DEBUG] Device %d response: ID=%d, DeviceID=%s, Name=%s\n", i, deviceResponse.ID, deviceResponse.DeviceID, deviceResponse.Name)
+		deviceResponses[i] = *deviceResponse
 	}
+
+	fmt.Printf("[DEBUG] Final deviceResponses length: %d\n", len(deviceResponses))
 
 	response := &models.ListResponse{
 		Items: deviceResponses,
@@ -230,6 +242,8 @@ func (h *DeviceHandler) GetDevices(c *gin.Context) {
 			TotalPages: int((total + int64(limit) - 1) / int64(limit)),
 		},
 	}
+
+	fmt.Printf("[DEBUG] Final response items length: %d\n", len(response.Items.([]models.DeviceResponse)))
 
 	c.JSON(http.StatusOK, models.SuccessResponseWithMessage("Devices retrieved successfully", response))
 }

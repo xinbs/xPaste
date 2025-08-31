@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Test</title>
+</head>
+<body>
+    <h1>WebSocket Connection Test</h1>
+    <div id="status">Connecting...</div>
+    <div id="messages"></div>
+    
+    <script>
+        // 从之前的登录获取token
+        const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoyLCJ1c2VybmFtZSI6InhpbmJzIiwiZGV2aWNlX2lkIjoianM4dWoxIiwiaXNzIjoieHBhc3RlLXN5bmMtYXBpIiwiZXhwIjoxNzU2NzA3MzM5LCJpYXQiOjE3NTY2MjA5Mzl9.bkvcRrD064aexLSkdV85wHpGV0eCDMNUg_UPj1szJ7o';
+        const deviceId = 'js8uj1';
+        const wsUrl = `ws://localhost:8080/ws?device_id=${deviceId}&token=${token}`;
+        
+        console.log('Attempting to connect to:', wsUrl);
+        
+        const ws = new WebSocket(wsUrl);
+        const statusDiv = document.getElementById('status');
+        const messagesDiv = document.getElementById('messages');
+        
+        function addMessage(message) {
+            const div = document.createElement('div');
+            div.textContent = new Date().toLocaleTimeString() + ': ' + message;
+            messagesDiv.appendChild(div);
+            console.log(message);
+        }
+        
+        ws.onopen = function(event) {
+            statusDiv.textContent = 'Connected!';
+            statusDiv.style.color = 'green';
+            addMessage('WebSocket connection opened');
+        };
+        
+        ws.onmessage = function(event) {
+            addMessage('Received: ' + event.data);
+        };
+        
+        ws.onclose = function(event) {
+            statusDiv.textContent = 'Disconnected';
+            statusDiv.style.color = 'red';
+            addMessage(`WebSocket connection closed. Code: ${event.code}, Reason: ${event.reason}`);
+        };
+        
+        ws.onerror = function(error) {
+            statusDiv.textContent = 'Error';
+            statusDiv.style.color = 'red';
+            addMessage('WebSocket error: ' + error);
+            console.error('WebSocket error:', error);
+        };
+        
+        // 发送ping消息测试
+        setTimeout(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                const pingMessage = {
+                    type: 'ping',
+                    timestamp: new Date().toISOString()
+                };
+                ws.send(JSON.stringify(pingMessage));
+                addMessage('Sent ping message');
+            }
+        }, 2000);
+    </script>
+</body>
+</html>

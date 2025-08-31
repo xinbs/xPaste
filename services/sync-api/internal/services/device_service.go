@@ -107,19 +107,29 @@ func (s *DeviceService) GetUserDevices(userID uint, params *models.PaginationPar
 	var devices []*models.Device
 	var total int64
 
+	fmt.Printf("[DEBUG] GetUserDevices called for userID: %d\n", userID)
+
 	// 计算总数
 	if err := s.db.Model(&models.Device{}).Where("user_id = ?", userID).Count(&total).Error; err != nil {
 		return nil, nil, fmt.Errorf("failed to count devices: %w", err)
 	}
 
+	fmt.Printf("[DEBUG] Total devices count: %d\n", total)
+
 	// 获取设备列表
 	query := s.db.Where("user_id = ?", userID).Order("last_seen DESC")
 	if params != nil {
 		query = query.Offset(params.GetOffset()).Limit(params.GetLimit())
+		fmt.Printf("[DEBUG] Pagination - offset: %d, limit: %d\n", params.GetOffset(), params.GetLimit())
 	}
 
 	if err := query.Find(&devices).Error; err != nil {
 		return nil, nil, fmt.Errorf("failed to get devices: %w", err)
+	}
+
+	fmt.Printf("[DEBUG] Found %d devices from database\n", len(devices))
+	for i, device := range devices {
+		fmt.Printf("[DEBUG] Device %d: ID=%d, DeviceID=%s, Name=%s, Status=%d\n", i, device.ID, device.DeviceID, device.Name, device.Status)
 	}
 
 	// 构建分页响应

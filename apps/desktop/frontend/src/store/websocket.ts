@@ -4,7 +4,7 @@ import { useClipboardStore } from './clipboard';
 import { useToastStore } from './toast';
 
 interface WebSocketMessage {
-  type: 'clipboard_sync' | 'device_status' | 'ping' | 'pong';
+  type: 'clipboard_sync' | 'device_online' | 'device_offline' | 'ping' | 'pong';
   data?: any;
   timestamp: string;
   device_id?: string;
@@ -75,11 +75,23 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => {
           }
           break;
           
-        case 'device_status':
-          // 处理设备状态更新
-          console.log('Device status update:', message.data);
-          if (message.data && message.data.online_devices) {
-            set({ onlineDevices: message.data.online_devices });
+        case 'device_online':
+          // 处理设备上线
+          console.log('Device online:', message.data);
+          if (message.data && message.data.device_id) {
+            const { onlineDevices } = get();
+            if (!onlineDevices.includes(message.data.device_id)) {
+              set({ onlineDevices: [...onlineDevices, message.data.device_id] });
+            }
+          }
+          break;
+          
+        case 'device_offline':
+          // 处理设备下线
+          console.log('Device offline:', message.data);
+          if (message.data && message.data.device_id) {
+            const { onlineDevices } = get();
+            set({ onlineDevices: onlineDevices.filter(id => id !== message.data.device_id) });
           }
           break;
           
@@ -156,6 +168,15 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => {
             error: null 
           });
           startPing();
+          
+          // 将当前设备添加到在线设备列表
+          const currentDevice = useAuthStore.getState().currentDevice;
+          if (currentDevice) {
+            const { onlineDevices } = get();
+            if (!onlineDevices.includes(currentDevice.device_id)) {
+              set({ onlineDevices: [...onlineDevices, currentDevice.device_id] });
+            }
+          }
         };
 
         newSocket.onmessage = handleMessage;
@@ -207,6 +228,13 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => {
       
       if (socket) {
         socket.close(1000, 'User disconnected');
+      }
+      
+      // 从在线设备列表中移除当前设备
+      const currentDevice = useAuthStore.getState().currentDevice;
+      if (currentDevice) {
+        const { onlineDevices } = get();
+        set({ onlineDevices: onlineDevices.filter(id => id !== currentDevice.device_id) });
       }
       
       set({ 

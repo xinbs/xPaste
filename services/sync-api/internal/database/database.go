@@ -54,7 +54,9 @@ func Initialize(cfg *config.Config) error {
 	switch cfg.Database.Driver {
 	case "sqlite":
 		// 使用纯Go SQLite驱动 (modernc.org/sqlite)
-		sqlDB, err := sql.Open("sqlite", cfg.Database.DSN+"?_pragma=foreign_keys(1)")
+		// 配置SQLite参数以避免数据库锁定问题
+		sqliteParams := "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(1000)&_pragma=temp_store(memory)"
+		sqlDB, err := sql.Open("sqlite", cfg.Database.DSN+sqliteParams)
 		if err != nil {
 			return fmt.Errorf("failed to open sqlite database: %w", err)
 		}
@@ -73,9 +75,16 @@ func Initialize(cfg *config.Config) error {
 		return fmt.Errorf("failed to get sql.DB instance: %w", err)
 	}
 
-	// 配置连接池
-	sqlDB.SetMaxOpenConns(cfg.Database.MaxOpenConns)
-	sqlDB.SetMaxIdleConns(cfg.Database.MaxIdleConns)
+	// 配置连接池 - SQLite特殊配置
+	if cfg.Database.Driver == "sqlite" {
+		// SQLite在WAL模式下支持多个读连接和一个写连接
+		// 设置合理的连接数以支持并发用户访问
+		sqlDB.SetMaxOpenConns(10)  // 允许最多10个并发连接
+		sqlDB.SetMaxIdleConns(5)   // 保持5个空闲连接
+	} else {
+		sqlDB.SetMaxOpenConns(cfg.Database.MaxOpenConns)
+		sqlDB.SetMaxIdleConns(cfg.Database.MaxIdleConns)
+	}
 	sqlDB.SetConnMaxLifetime(cfg.Database.ConnMaxLifetime)
 	sqlDB.SetConnMaxIdleTime(cfg.Database.ConnMaxIdleTime)
 

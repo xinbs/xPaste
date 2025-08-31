@@ -214,6 +214,8 @@ export const useAuthStore = create<AuthState>()(
           const response = await apiClient.getDevices(signal);
           if (response.success) {
             const devices = response.data.items;
+            console.log('API response:', response);
+            console.log('Fetched devices from API:', devices);
             const { currentDevice } = get();
             
             // 检查currentDevice是否仍然存在于设备列表中
