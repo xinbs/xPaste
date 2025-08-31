@@ -273,15 +273,12 @@ type BroadcastMessageRequest struct {
 
 // RegisterRoutes 注册 WebSocket 相关路由
 func (h *Handler) RegisterRoutes(router *gin.RouterGroup) {
-	// WebSocket 连接路由
-	router.GET("/ws", h.HandleWebSocket)
+	// WebSocket 连接路由（根路径，因为已经在 /ws 路由组下）
+	router.GET("", h.HandleWebSocket)
 
 	// WebSocket 管理路由
-	ws := router.Group("/ws")
-	{
-		ws.GET("/devices/online", h.GetOnlineDevices)
-		ws.GET("/stats", h.GetConnectionStats)
-		ws.POST("/send", h.SendMessage)
-		ws.POST("/broadcast", h.BroadcastMessage)
-	}
+	router.GET("/devices/online", h.GetOnlineDevices)
+	router.GET("/stats", h.GetConnectionStats)
+	router.POST("/send", h.SendMessage)
+	router.POST("/broadcast", h.BroadcastMessage)
 }

@@ -5,7 +5,7 @@ import { useToastStore } from './toast';
 
 interface ClipItem {
   id: string;
-  content_type: string;
+  type: string;
   content?: string;
   file_path?: string;
   metadata?: any;
@@ -22,7 +22,7 @@ interface ClipboardState {
   isMonitoring: boolean;
   
   // Actions
-  fetchItems: () => Promise<void>;
+  fetchItems: (signal?: AbortSignal) => Promise<void>;
   addItem: (item: Omit<ClipItem, 'id' | 'created_at' | 'updated_at' | 'device_id'>) => Promise<boolean>;
   deleteItem: (id: string) => Promise<boolean>;
   copyToClipboard: (content: string) => Promise<boolean>;
@@ -37,6 +37,7 @@ interface ClipboardState {
 // 剪贴板监控相关
 let monitoringInterval: NodeJS.Timeout | null = null;
 let lastClipboardContent = '';
+let lastClipboardImageHash = '';
 
 export const useClipboardStore = create<ClipboardState>()((set, get) => ({
   items: [],
@@ -44,16 +45,21 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
   error: null,
   isMonitoring: false,
 
-  fetchItems: async () => {
+  fetchItems: async (signal?: AbortSignal) => {
     set({ isLoading: true, error: null });
     try {
-      const response = await apiClient.getClipItems();
+      const response = await apiClient.getClipItems(signal);
       if (response.success) {
         set({ items: response.data.items || [], isLoading: false });
       } else {
         set({ error: response.message, isLoading: false });
       }
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        // 请求被取消，不显示错误
+        set({ isLoading: false });
+        return;
+      }
       const errorMessage = error instanceof Error ? error.message : '获取剪贴板历史失败';
       set({ error: errorMessage, isLoading: false });
       useToastStore.getState().showError('获取剪贴板历史失败', errorMessage);
@@ -64,7 +70,7 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
     set({ error: null });
     try {
       const response = await apiClient.createClipItem({
-        content_type: itemData.content_type,
+        type: itemData.type,
         content: itemData.content,
         file_path: itemData.file_path,
         metadata: {
@@ -75,7 +81,12 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
       
       if (response.success) {
         // 重新获取列表以确保数据同步
-        await get().fetchItems();
+        try {
+          await get().fetchItems();
+        } catch (fetchError) {
+          // 如果重新获取失败，不影响添加操作的成功状态
+          console.warn('Failed to refresh items after adding:', fetchError);
+        }
         
         // 广播到其他设备
         get().broadcastClipboardChange(response.data);
@@ -135,30 +146,108 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
     
     monitoringInterval = setInterval(async () => {
       try {
-        const currentContent = await navigator.clipboard.readText();
+        // 使用 navigator.clipboard.read() 来检测所有类型的剪贴板内容
+        const clipboardItems = await navigator.clipboard.read();
         
-        // 检查内容是否发生变化
-        if (currentContent && currentContent !== lastClipboardContent) {
-          lastClipboardContent = currentContent;
+        for (const clipboardItem of clipboardItems) {
+          // 检查文本内容
+          if (clipboardItem.types.includes('text/plain')) {
+            const textBlob = await clipboardItem.getType('text/plain');
+            const currentContent = await textBlob.text();
+            
+            if (currentContent && currentContent !== lastClipboardContent) {
+              lastClipboardContent = currentContent;
+              
+              const success = await get().addItem({
+                type: 'text',
+                content: currentContent,
+                metadata: {
+                  source: 'auto_monitor',
+                  auto_detected: true,
+                },
+              });
+              
+              if (!success) {
+                console.warn('自动添加文本剪贴板内容失败');
+              }
+            }
+          }
           
-          // 自动添加到剪贴板历史
-          const success = await get().addItem({
-            content_type: 'text',
-            content: currentContent,
-            metadata: {
-              source: 'auto_monitor',
-              auto_detected: true,
-            },
-          });
-          
-          if (!success) {
-            console.warn('自动添加剪贴板内容失败');
+          // 检查图片内容
+          const imageTypes = clipboardItem.types.filter(type => type.startsWith('image/'));
+          if (imageTypes.length > 0) {
+            const imageType = imageTypes[0];
+            const imageBlob = await clipboardItem.getType(imageType);
+            
+            // 生成图片的简单哈希来检测变化
+            const arrayBuffer = await imageBlob.arrayBuffer();
+            const hashArray = new Uint8Array(arrayBuffer.slice(0, 1024)); // 取前1KB作为哈希
+            const currentImageHash = Array.from(hashArray).join(',');
+            
+            if (currentImageHash && currentImageHash !== lastClipboardImageHash) {
+              lastClipboardImageHash = currentImageHash;
+              
+              // 将图片转换为base64
+              const reader = new FileReader();
+              reader.onload = async () => {
+                const base64Data = reader.result as string;
+                
+                const success = await get().addItem({
+                  type: 'image',
+                  content: base64Data,
+                  metadata: {
+                    source: 'auto_monitor',
+                    auto_detected: true,
+                    mime_type: imageType,
+                    size: imageBlob.size,
+                  },
+                });
+                
+                if (!success) {
+                  console.warn('自动添加图片剪贴板内容失败');
+                }
+              };
+              reader.readAsDataURL(imageBlob);
+            }
           }
         }
       } catch (error) {
-        // 忽略权限相关错误，但记录其他错误
-        if (error instanceof Error && !error.message.includes('permission')) {
-          console.error('剪贴板监控错误:', error);
+        // 如果 navigator.clipboard.read() 不支持，回退到只检测文本
+        if (error instanceof Error && error.name === 'NotSupportedError') {
+          try {
+            const currentContent = await navigator.clipboard.readText();
+            
+            if (currentContent && currentContent !== lastClipboardContent) {
+              lastClipboardContent = currentContent;
+              
+              const success = await get().addItem({
+                type: 'text',
+                content: currentContent,
+                metadata: {
+                  source: 'auto_monitor',
+                  auto_detected: true,
+                },
+              });
+              
+              if (!success) {
+                console.warn('自动添加文本剪贴板内容失败');
+              }
+            }
+          } catch (textError) {
+            // 忽略权限相关错误和文档失去焦点的错误
+            if (textError instanceof Error && 
+                !textError.message.includes('permission') && 
+                textError.name !== 'NotAllowedError') {
+              console.error('剪贴板文本监控错误:', textError);
+            }
+          }
+        } else {
+          // 忽略权限相关错误和文档失去焦点的错误，但记录其他错误
+          if (error instanceof Error && 
+              !error.message.includes('permission') && 
+              error.name !== 'NotAllowedError') {
+            console.error('剪贴板监控错误:', error);
+          }
         }
       }
     }, 2000); // 每2秒检查一次

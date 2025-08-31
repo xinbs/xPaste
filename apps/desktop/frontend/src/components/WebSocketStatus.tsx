@@ -22,7 +22,11 @@ export default function WebSocketStatus() {
   // 自动连接
   useEffect(() => {
     if (isAuthenticated && currentDevice && !isConnected && !isConnecting) {
-      connect();
+      // 添加延迟确保认证状态稳定
+      const timer = setTimeout(() => {
+        connect();
+      }, 100);
+      return () => clearTimeout(timer);
     }
   }, [isAuthenticated, currentDevice, isConnected, isConnecting, connect]);
 

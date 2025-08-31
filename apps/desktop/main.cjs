@@ -4,6 +4,7 @@ const isDev = process.env.NODE_ENV === 'development';
 
 // 保持对窗口对象的全局引用，如果不这样做，当JavaScript对象被垃圾回收时，窗口将自动关闭
 let mainWindow;
+let settingsWindow;
 
 function createWindow() {
   // 创建浏览器窗口
@@ -16,7 +17,9 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       enableRemoteModule: false,
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+      webSecurity: true,
+      allowRunningInsecureContent: false
     },
     icon: path.join(__dirname, 'assets', 'icon.png'), // 应用图标
     show: false, // 先不显示，等加载完成后再显示
@@ -54,6 +57,44 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
+  });
+}
+
+function createSettingsWindow() {
+  // 如果设置窗口已经存在，则聚焦到该窗口
+  if (settingsWindow) {
+    settingsWindow.focus();
+    return;
+  }
+
+  settingsWindow = new BrowserWindow({
+    width: 800,
+    height: 600,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
+    },
+    parent: mainWindow,
+    modal: false,
+    show: false,
+    title: 'xPaste 设置'
+  });
+
+  // 使用独立的设置窗口HTML文件，避免与主窗口强耦合
+  const settingsUrl = `file://${path.join(__dirname, 'settings.html')}`;
+  
+  settingsWindow.loadURL(settingsUrl);
+
+  settingsWindow.once('ready-to-show', () => {
+    settingsWindow.show();
+    if (isDev) {
+      settingsWindow.webContents.openDevTools();
+    }
+  });
+
+  settingsWindow.on('closed', () => {
+    settingsWindow = null;
   });
 }
 
@@ -101,6 +142,15 @@ function createMenu() {
             }
           }
         },
+        { type: 'separator' },
+        {
+          label: '设置',
+          accelerator: 'CmdOrCtrl+,',
+          click: () => {
+            createSettingsWindow();
+          }
+        },
+        { type: 'separator' },
         {
           label: '导入设置',
           click: async () => {
@@ -246,6 +296,17 @@ ipcMain.handle('show-save-dialog', async (event, options) => {
 ipcMain.handle('show-open-dialog', async (event, options) => {
   const result = await dialog.showOpenDialog(mainWindow, options);
   return result;
+});
+
+ipcMain.handle('open-settings-window', () => {
+  createSettingsWindow();
+});
+
+ipcMain.handle('close-current-window', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window) {
+    window.close();
+  }
 });
 
 // 处理应用程序协议（用于深度链接）

@@ -2,14 +2,13 @@ import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/store/auth';
 import { useClipboardStore } from '@/store/clipboard';
 import { useWebSocketStore } from '@/store/websocket';
-import { Copy, Monitor, Settings, LogOut, Plus, Trash2, Upload, Play, Pause, X, RefreshCw, Edit2 } from 'lucide-react';
-import SettingsComponent from './Settings';
+import { Copy, Monitor, LogOut, Plus, Trash2, Upload, Play, Pause, X, RefreshCw, Edit2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import FileUpload, { FilePreview } from '@/components/FileUpload';
 import WebSocketStatus from '@/components/WebSocketStatus';
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<'clipboard' | 'devices' | 'settings'>('clipboard');
+  const [activeTab, setActiveTab] = useState<'clipboard' | 'devices'>('clipboard');
   const [newClipText, setNewClipText] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [showFileUpload, setShowFileUpload] = useState(false);
@@ -34,15 +33,67 @@ export default function Dashboard() {
   const { isConnected, connect, disconnect, onlineDevices } = useWebSocketStore();
 
   useEffect(() => {
-    fetchClipItems();
-    fetchDevices();
+    let isMounted = true;
+    let timeoutId: NodeJS.Timeout;
+    const clipItemsController = new AbortController();
+    const devicesController = new AbortController();
+    
+    const loadData = async () => {
+      // 添加小延迟避免与App.tsx中的初始化请求冲突
+      await new Promise(resolve => {
+        timeoutId = setTimeout(resolve, 100);
+      });
+      
+      if (!isMounted) return;
+      
+      // 并行加载数据，使用独立的AbortController
+      const promises = [];
+      
+      if (isMounted && !clipItemsController.signal.aborted) {
+        promises.push(
+          fetchClipItems(clipItemsController.signal).catch(error => {
+            if (error instanceof Error && error.name !== 'AbortError') {
+              console.error('Failed to fetch clip items:', error);
+            }
+          })
+        );
+      }
+      
+      if (isMounted && !devicesController.signal.aborted) {
+        promises.push(
+          fetchDevices(devicesController.signal).catch(error => {
+            if (error instanceof Error && error.name !== 'AbortError') {
+              console.error('Failed to fetch devices:', error);
+            }
+          })
+        );
+      }
+      
+      await Promise.allSettled(promises);
+    };
+    
+    loadData();
+    
+    // 默认启动剪贴板监听
+    if (!isMonitoring) {
+      startMonitoring();
+    }
+    
+    return () => {
+      isMounted = false;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      clipItemsController.abort();
+      devicesController.abort();
+    };
   }, []);
 
   const handleAddTextItem = async () => {
     if (!newClipText.trim()) return;
     
     const success = await addItem({
-      content_type: 'text',
+      type: 'text',
       content: newClipText.trim(),
       metadata: {
         source: 'manual',
@@ -235,7 +286,7 @@ export default function Dashboard() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center space-x-2 mb-2">
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                        {item.content_type}
+                        {item.type}
                       </span>
                       {item.device_name && (
                         <span className="text-xs text-gray-500">
@@ -243,25 +294,85 @@ export default function Dashboard() {
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-gray-900 break-words">
-                      {item.content_type === 'text' ? (
-                        item.content
+                    <div className="text-sm text-gray-900 break-words">
+                      {item.type === 'text' ? (
+                        <p>{item.content}</p>
+                      ) : item.type === 'image' ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-gray-600">图片预览:</span>
+                            {item.metadata?.size && (
+                              <span className="text-xs text-gray-500">
+                                ({Math.round(item.metadata.size / 1024)}KB)
+                              </span>
+                            )}
+                          </div>
+                          {item.content && (
+                            <div className="relative inline-block">
+                              <img 
+                                src={item.content} 
+                                alt="剪贴板图片" 
+                                className="max-w-xs max-h-32 rounded-lg border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity"
+                                onClick={() => {
+                                  // 在新窗口中打开完整图片
+                                  const newWindow = window.open();
+                                  if (newWindow) {
+                                    newWindow.document.write(`
+                                      <html>
+                                        <head><title>图片预览</title></head>
+                                        <body style="margin:0;padding:20px;background:#f5f5f5;display:flex;justify-content:center;align-items:center;min-height:100vh;">
+                                          <img src="${item.content}" style="max-width:100%;max-height:100%;object-fit:contain;" />
+                                        </body>
+                                      </html>
+                                    `);
+                                  }
+                                }}
+                                title="点击查看完整图片"
+                              />
+                            </div>
+                          )}
+                        </div>
                       ) : (
-                        <span className="italic text-gray-500">
+                        <p className="italic text-gray-500">
                           {item.file_path || '文件内容'}
-                        </span>
+                        </p>
                       )}
-                    </p>
+                    </div>
                     <p className="text-xs text-gray-500 mt-1">
                       {formatDate(item.created_at)}
                     </p>
                   </div>
                   <div className="flex items-center space-x-2 ml-4">
-                    {item.content_type === 'text' && item.content && (
+                    {item.type === 'text' && item.content && (
                       <button
                         onClick={() => handleCopyItem(item.content!)}
                         className="p-1 text-gray-400 hover:text-gray-600"
-                        title="复制"
+                        title="复制文本"
+                      >
+                        <Copy className="w-4 h-4" />
+                      </button>
+                    )}
+                    {item.type === 'image' && item.content && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            // 将base64图片转换为Blob
+                            const response = await fetch(item.content!);
+                            const blob = await response.blob();
+                            
+                            // 复制图片到剪贴板
+                            await navigator.clipboard.write([
+                              new ClipboardItem({ [blob.type]: blob })
+                            ]);
+                            
+                            // 可以显示成功提示
+                            console.log('图片已复制到剪贴板');
+                          } catch (error) {
+                            console.error('复制图片失败:', error);
+                          }
+                        }}
+                        className="p-1 text-gray-400 hover:text-gray-600"
+                        title="复制图片"
                       >
                         <Copy className="w-4 h-4" />
                       </button>
@@ -510,9 +621,7 @@ export default function Dashboard() {
     );
   };
 
-  const renderSettingsTab = () => (
-    <SettingsComponent />
-  );
+
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -526,6 +635,13 @@ export default function Dashboard() {
             <div className="flex items-center space-x-4">
               <WebSocketStatus />
               <span className="text-sm text-gray-700">欢迎, {user?.username}</span>
+              <button
+                onClick={logout}
+                className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+              >
+                <LogOut className="w-4 h-4 mr-2" />
+                退出
+              </button>
             </div>
           </div>
         </div>
@@ -539,7 +655,6 @@ export default function Dashboard() {
               {[
                 { key: 'clipboard', label: '剪贴板', icon: Copy },
                 { key: 'devices', label: '设备', icon: Monitor },
-                { key: 'settings', label: '设置', icon: Settings },
               ].map(({ key, label, icon: Icon }) => (
                 <button
                   key={key}
@@ -561,7 +676,6 @@ export default function Dashboard() {
           {/* 标签页内容 */}
           {activeTab === 'clipboard' && renderClipboardTab()}
           {activeTab === 'devices' && renderDevicesTab()}
-          {activeTab === 'settings' && renderSettingsTab()}
         </div>
       </div>
     </div>

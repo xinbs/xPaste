@@ -1,6 +1,7 @@
 package services
 
 import (
+	"crypto/md5"
 	"errors"
 	"fmt"
 	"time"
@@ -22,8 +23,13 @@ func NewDeviceService(db *gorm.DB) *DeviceService {
 
 // RegisterDevice 注册设备
 func (s *DeviceService) RegisterDevice(userID uint, req *models.RegisterDeviceRequest, clientIP string) (*models.Device, error) {
-	// 生成设备ID
-	deviceID := generateDeviceID(userID, req.Name)
+	// 优先使用前端传递的设备ID，如果没有则生成一个
+	var deviceID string
+	if req.DeviceID != "" {
+		deviceID = req.DeviceID
+	} else {
+		deviceID = generateDeviceID(userID, req.Name)
+	}
 
 	// 检查设备是否已存在
 	var existingDevice models.Device
@@ -257,19 +263,19 @@ func (s *DeviceService) GetDeviceStats(userID uint, deviceID string) (*DeviceSta
 	stats.Device = device
 
 	// 获取剪贴板项数量
-	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND device_id = ? AND deleted_at IS NULL", userID, deviceID).Count(&stats.ClipItemCount).Error; err != nil {
+	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND device_id = ?", userID, deviceID).Count(&stats.ClipItemCount).Error; err != nil {
 		return nil, fmt.Errorf("failed to count clip items: %w", err)
 	}
 
 	// 获取今日剪贴板项数量
 	today := time.Now().Truncate(24 * time.Hour)
-	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND device_id = ? AND created_at >= ? AND deleted_at IS NULL", userID, deviceID, today).Count(&stats.TodayClipItemCount).Error; err != nil {
+	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND device_id = ? AND created_at >= ?", userID, deviceID, today).Count(&stats.TodayClipItemCount).Error; err != nil {
 		return nil, fmt.Errorf("failed to count today's clip items: %w", err)
 	}
 
 	// 获取最后同步时间
 	var lastSyncTime time.Time
-	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND device_id = ? AND deleted_at IS NULL", userID, deviceID).Select("MAX(updated_at)").Scan(&lastSyncTime).Error; err != nil {
+	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND device_id = ?", userID, deviceID).Select("MAX(updated_at)").Scan(&lastSyncTime).Error; err != nil {
 		return nil, fmt.Errorf("failed to get last sync time: %w", err)
 	}
 	stats.LastSyncTime = &lastSyncTime
@@ -324,6 +330,9 @@ func (s *DeviceService) BulkUpdateDeviceStatus(userID uint, deviceIDs []string, 
 }
 
 // generateDeviceID 生成设备ID
+// 基于用户ID和设备名称生成固定的设备ID，确保同一设备不会重复注册
 func generateDeviceID(userID uint, deviceName string) string {
-	return fmt.Sprintf("%d-%s-%d", userID, deviceName, time.Now().Unix())
+	// 使用用户ID和设备名称的哈希值生成固定的设备ID
+	hash := fmt.Sprintf("%d-%s", userID, deviceName)
+	return fmt.Sprintf("%x", md5.Sum([]byte(hash)))
 }

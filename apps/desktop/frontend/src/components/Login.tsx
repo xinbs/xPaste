@@ -16,7 +16,7 @@ export default function Login({ onSuccess }: LoginProps) {
     confirmPassword: '',
   });
 
-  const { login, register, isLoading, error, clearError } = useAuthStore();
+  const { login, register, isLoading, error, clearError, clearStorage } = useAuthStore();
   const { showSuccess, showError } = useToastStore();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -166,6 +166,19 @@ export default function Login({ onSuccess }: LoginProps) {
               ) : (
                 isRegisterMode ? '注册' : '登录'
               )}
+            </button>
+          </div>
+
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={() => {
+                clearStorage();
+                showSuccess('清除成功', '本地存储已清除，请重新登录');
+              }}
+              className="w-full flex justify-center py-2 px-4 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              清除本地存储
             </button>
           </div>
         </form>

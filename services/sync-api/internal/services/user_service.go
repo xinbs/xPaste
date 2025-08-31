@@ -237,24 +237,24 @@ func (s *UserService) GetUserStats(userID uint) (*UserStats, error) {
 	var stats UserStats
 
 	// 获取设备数量
-	if err := s.db.Model(&models.Device{}).Where("user_id = ? AND deleted_at IS NULL", userID).Count(&stats.DeviceCount).Error; err != nil {
+	if err := s.db.Model(&models.Device{}).Where("user_id = ?", userID).Count(&stats.DeviceCount).Error; err != nil {
 		return nil, fmt.Errorf("failed to count devices: %w", err)
 	}
 
 	// 获取剪贴板项数量
-	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND deleted_at IS NULL", userID).Count(&stats.ClipItemCount).Error; err != nil {
+	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ?", userID).Count(&stats.ClipItemCount).Error; err != nil {
 		return nil, fmt.Errorf("failed to count clip items: %w", err)
 	}
 
 	// 获取今日剪贴板项数量
 	today := time.Now().Truncate(24 * time.Hour)
-	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND created_at >= ? AND deleted_at IS NULL", userID, today).Count(&stats.TodayClipItemCount).Error; err != nil {
+	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND created_at >= ?", userID, today).Count(&stats.TodayClipItemCount).Error; err != nil {
 		return nil, fmt.Errorf("failed to count today's clip items: %w", err)
 	}
 
 	// 获取存储使用量（字节）
 	var totalSize sql.NullInt64
-	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND deleted_at IS NULL", userID).Select("COALESCE(SUM(size), 0)").Scan(&totalSize).Error; err != nil {
+	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ?", userID).Select("COALESCE(SUM(size), 0)").Scan(&totalSize).Error; err != nil {
 		return nil, fmt.Errorf("failed to calculate storage usage: %w", err)
 	}
 	stats.StorageUsage = totalSize.Int64

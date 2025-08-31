@@ -1,8 +1,39 @@
 package models
 
 import (
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
 	"time"
 )
+
+// JSON is a custom type for handling JSON data in GORM
+type JSON map[string]interface{}
+
+// Value implements the driver.Valuer interface
+func (j JSON) Value() (driver.Value, error) {
+	if j == nil {
+		return nil, nil
+	}
+	return json.Marshal(j)
+}
+
+// Scan implements the sql.Scanner interface
+func (j *JSON) Scan(value interface{}) error {
+	if value == nil {
+		*j = nil
+		return nil
+	}
+
+	switch v := value.(type) {
+	case []byte:
+		return json.Unmarshal(v, j)
+	case string:
+		return json.Unmarshal([]byte(v), j)
+	default:
+		return fmt.Errorf("cannot scan %T into JSON", value)
+	}
+}
 
 // ClipType 剪贴板项类型
 type ClipType string
@@ -32,7 +63,7 @@ type ClipItem struct {
 	Title       string      `json:"title" gorm:"size:255"`
 	Description string      `json:"description" gorm:"type:text"`
 	Tags        []string    `json:"tags" gorm:"type:json"`
-	Metadata    interface{} `json:"metadata" gorm:"type:json"`
+	Metadata     JSON        `json:"metadata" gorm:"type:json"`
 	Status      ClipStatus  `json:"status" gorm:"size:20;not null;default:'active';index"`
 	ViewCount   int         `json:"view_count" gorm:"default:0"`
 	UsedAt      *time.Time  `json:"used_at" gorm:"index"`
@@ -79,7 +110,7 @@ type CreateClipRequest struct {
 	Title       string      `json:"title,omitempty"`
 	Description string      `json:"description,omitempty"`
 	Tags        []string    `json:"tags,omitempty"`
-	Metadata    interface{} `json:"metadata,omitempty"`
+	Metadata    JSON        `json:"metadata,omitempty"`
 	ExpiresAt   *time.Time  `json:"expires_at,omitempty"`
 }
 
@@ -88,7 +119,7 @@ type UpdateClipRequest struct {
 	Title       *string     `json:"title,omitempty"`
 	Description *string     `json:"description,omitempty"`
 	Tags        []string    `json:"tags,omitempty"`
-	Metadata    interface{} `json:"metadata,omitempty"`
+	Metadata    *JSON       `json:"metadata,omitempty"`
 	ExpiresAt   *time.Time  `json:"expires_at,omitempty"`
 }
 

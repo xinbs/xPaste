@@ -51,8 +51,15 @@ func SetupUploadMiddlewares(r *gin.RouterGroup, db *gorm.DB) {
 
 // SetupWebSocketMiddlewares 设置WebSocket相关中间件
 func SetupWebSocketMiddlewares(r *gin.RouterGroup, db *gorm.DB) {
-	// WebSocket连接限流中间件
-	r.Use(CreateRateLimitMiddleware(100, 10, IPKeyFunc))
+	// WebSocket连接限流中间件 - 更宽松的限制
+	r.Use(CreateRateLimitMiddleware(50, 50, func(c *gin.Context) string {
+		// 基于用户ID的限流，如果没有用户信息则使用IP
+		userID, exists := GetUserIDFromContext(c)
+		if exists {
+			return fmt.Sprintf("ws:user:%d", userID)
+		}
+		return fmt.Sprintf("ws:ip:%s", c.ClientIP())
+	}))
 
 	// 可选认证中间件（WebSocket可能需要在连接后进行认证）
 	r.Use(OptionalAuthMiddleware(db))

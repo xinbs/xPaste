@@ -28,7 +28,7 @@ interface WebSocketState {
   resetReconnectAttempts: () => void;
 }
 
-const WS_URL = 'ws://localhost:8080/ws/ws';
+const WS_URL = 'ws://localhost:8080/ws';
 const PING_INTERVAL = 30000; // 30秒
 const RECONNECT_DELAY = 5000; // 5秒
 
@@ -99,6 +99,13 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => {
   const attemptReconnect = () => {
     const { reconnectAttempts, maxReconnectAttempts } = get();
     
+    // 检查用户是否仍然认证，如果未认证则不重连
+    const { isAuthenticated, currentDevice, token } = useAuthStore.getState();
+    if (!isAuthenticated || !currentDevice || !token) {
+      console.log('User not authenticated, stopping reconnection attempts');
+      return;
+    }
+    
     if (reconnectAttempts < maxReconnectAttempts) {
       set({ reconnectAttempts: reconnectAttempts + 1 });
       
@@ -122,9 +129,9 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => {
     onlineDevices: [],
 
     connect: () => {
-      const { isAuthenticated, currentDevice } = useAuthStore.getState();
-      if (!isAuthenticated || !currentDevice) {
-        set({ error: 'Not authenticated or missing device' });
+      const { isAuthenticated, currentDevice, token } = useAuthStore.getState();
+      if (!isAuthenticated || !currentDevice || !token) {
+        set({ error: 'Not authenticated or missing device/token' });
         return;
       }
 
@@ -135,8 +142,7 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => {
       set({ isConnecting: true, error: null });
       
       try {
-      const { token } = useAuthStore.getState();
-       const wsUrl = `${WS_URL}?device_id=${currentDevice.id}&token=${token}`;
+       const wsUrl = `${WS_URL}?device_id=${currentDevice.device_id}&token=${token}`;
        const newSocket = new WebSocket(wsUrl);
        set({ socket: newSocket });
 

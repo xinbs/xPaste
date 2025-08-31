@@ -45,7 +45,7 @@ func Initialize(cfg *config.Config) error {
 	gormConfig := &gorm.Config{
 		Logger: logger.Default.LogMode(logLevel),
 		NowFunc: func() time.Time {
-			return time.Now().UTC()
+			return time.Now()
 		},
 	}
 

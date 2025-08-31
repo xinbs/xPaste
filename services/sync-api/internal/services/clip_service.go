@@ -52,7 +52,7 @@ func (s *ClipService) CreateClipItem(userID uint, req *models.CreateClipRequest)
 // GetClipItem 根据ID获取剪贴板项
 func (s *ClipService) GetClipItem(userID uint, clipID uint) (*models.ClipItem, error) {
 	var clipItem models.ClipItem
-	if err := s.db.Where("id = ? AND user_id = ? AND deleted_at IS NULL", clipID, userID).First(&clipItem).Error; err != nil {
+	if err := s.db.Where("id = ? AND user_id = ?", clipID, userID).First(&clipItem).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, models.ErrClipItemNotFound
 		}
@@ -77,7 +77,7 @@ func (s *ClipService) GetUserClipItems(userID uint, params *ClipListParams) ([]*
 	var total int64
 
 	// 构建查询条件
-	query := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND deleted_at IS NULL", userID)
+	query := s.db.Model(&models.ClipItem{}).Where("user_id = ?", userID)
 
 	// 过滤条件
 	if params != nil {
@@ -137,7 +137,7 @@ func (s *ClipService) GetUserClipItems(userID uint, params *ClipListParams) ([]*
 // GetRecentClipItems 获取最近的剪贴板项
 func (s *ClipService) GetRecentClipItems(userID uint, limit int) ([]*models.ClipItem, error) {
 	var clipItems []*models.ClipItem
-	query := s.db.Where("user_id = ? AND status = ? AND deleted_at IS NULL", userID, models.ClipStatusActive)
+	query := s.db.Where("user_id = ? AND status = ?", userID, models.ClipStatusActive)
 	query = query.Where("expires_at IS NULL OR expires_at > ?", time.Now())
 	query = query.Order("last_used DESC").Limit(limit)
 
@@ -151,7 +151,7 @@ func (s *ClipService) GetRecentClipItems(userID uint, limit int) ([]*models.Clip
 // UpdateClipItem 更新剪贴板项
 func (s *ClipService) UpdateClipItem(userID uint, clipID uint, req *models.UpdateClipRequest) (*models.ClipItem, error) {
 	var clipItem models.ClipItem
-	if err := s.db.Where("id = ? AND user_id = ? AND deleted_at IS NULL", clipID, userID).First(&clipItem).Error; err != nil {
+	if err := s.db.Where("id = ? AND user_id = ?", clipID, userID).First(&clipItem).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, models.ErrClipItemNotFound
 		}
@@ -195,7 +195,7 @@ func (s *ClipService) BatchDeleteClipItems(userID uint, clipIDs []uint) error {
 // MarkClipItemAsUsed 标记剪贴板项为已使用
 func (s *ClipService) MarkClipItemAsUsed(userID uint, clipID uint) error {
 	var clipItem models.ClipItem
-	if err := s.db.Where("id = ? AND user_id = ? AND deleted_at IS NULL", clipID, userID).First(&clipItem).Error; err != nil {
+	if err := s.db.Where("id = ? AND user_id = ?", clipID, userID).First(&clipItem).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return models.ErrClipItemNotFound
 		}
@@ -219,12 +219,12 @@ func (s *ClipService) GetClipItemsByDevice(userID uint, deviceID string, params 
 	var total int64
 
 	// 计算总数
-	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND device_id = ? AND deleted_at IS NULL", userID, deviceID).Count(&total).Error; err != nil {
+	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND device_id = ?", userID, deviceID).Count(&total).Error; err != nil {
 		return nil, nil, fmt.Errorf("failed to count clip items: %w", err)
 	}
 
 	// 获取列表
-	query := s.db.Where("user_id = ? AND device_id = ? AND deleted_at IS NULL", userID, deviceID).Order("created_at DESC")
+	query := s.db.Where("user_id = ? AND device_id = ?", userID, deviceID).Order("created_at DESC")
 	if params != nil {
 		query = query.Offset(params.GetOffset()).Limit(params.GetLimit())
 	}
@@ -252,7 +252,7 @@ func (s *ClipService) SyncClipItems(userID uint, deviceID string, lastSyncTime *
 	var result SyncResult
 
 	// 获取需要同步的剪贴板项（在lastSyncTime之后更新的）
-	query := s.db.Where("user_id = ? AND deleted_at IS NULL", userID)
+	query := s.db.Where("user_id = ?", userID)
 	if lastSyncTime != nil {
 		query = query.Where("updated_at > ?", *lastSyncTime)
 	}
@@ -279,19 +279,19 @@ func (s *ClipService) GetClipItemStats(userID uint) (*ClipStats, error) {
 	var stats ClipStats
 
 	// 总数
-	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND deleted_at IS NULL", userID).Count(&stats.TotalCount).Error; err != nil {
+	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ?", userID).Count(&stats.TotalCount).Error; err != nil {
 		return nil, fmt.Errorf("failed to count total clip items: %w", err)
 	}
 
 	// 今日新增
 	today := time.Now().Truncate(24 * time.Hour)
-	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND created_at >= ? AND deleted_at IS NULL", userID, today).Count(&stats.TodayCount).Error; err != nil {
+	if err := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND created_at >= ?", userID, today).Count(&stats.TodayCount).Error; err != nil {
 		return nil, fmt.Errorf("failed to count today's clip items: %w", err)
 	}
 
 	// 按类型统计
 	stats.TypeStats = make(map[string]int64)
-	rows, err := s.db.Model(&models.ClipItem{}).Select("type, COUNT(*) as count").Where("user_id = ? AND deleted_at IS NULL", userID).Group("type").Rows()
+	rows, err := s.db.Model(&models.ClipItem{}).Select("type, COUNT(*) as count").Where("user_id = ?", userID).Group("type").Rows()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get type stats: %w", err)
 	}
@@ -308,7 +308,7 @@ func (s *ClipService) GetClipItemStats(userID uint) (*ClipStats, error) {
 
 	// 总存储大小
 	var totalSize sql.NullInt64
-	if err := s.db.Model(&models.ClipItem{}).Select("SUM(size)").Where("user_id = ? AND deleted_at IS NULL", userID).Scan(&totalSize).Error; err != nil {
+	if err := s.db.Model(&models.ClipItem{}).Select("SUM(size)").Where("user_id = ?", userID).Scan(&totalSize).Error; err != nil {
 		return nil, fmt.Errorf("failed to calculate total size: %w", err)
 	}
 	if totalSize.Valid {
@@ -333,7 +333,7 @@ func (s *ClipService) SearchClipItems(userID uint, query string, params *models.
 	var total int64
 
 	searchTerm := "%" + strings.ToLower(query) + "%"
-	dbQuery := s.db.Model(&models.ClipItem{}).Where("user_id = ? AND deleted_at IS NULL", userID)
+	dbQuery := s.db.Model(&models.ClipItem{}).Where("user_id = ?", userID)
 	dbQuery = dbQuery.Where("LOWER(title) LIKE ? OR LOWER(content) LIKE ?", searchTerm, searchTerm)
 
 	// 计算总数

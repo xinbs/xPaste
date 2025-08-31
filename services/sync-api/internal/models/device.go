@@ -154,6 +154,7 @@ func (d *Device) UpdateSyncTime() {
 
 // RegisterDeviceRequest 注册设备请求
 type RegisterDeviceRequest struct {
+	DeviceID     string              `json:"device_id,omitempty"` // 前端传递的设备ID，可选
 	Name         string              `json:"name" binding:"required,min=1,max=100"`
 	Platform     DevicePlatform      `json:"platform" binding:"required"`
 	Version      string              `json:"version" binding:"max=50"`

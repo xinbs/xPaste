@@ -59,28 +59,60 @@ class ApiClient {
       (headers as Record<string, string>).Authorization = `Bearer ${this.token}`;
     }
 
-    const response = await fetch(url, {
-      ...options,
-      headers,
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+    // 使用传入的signal或创建新的controller
+    let controller: AbortController | null = null;
+    let timeoutId: NodeJS.Timeout | null = null;
+    let signal = options.signal;
+    
+    // 只有在没有传入signal时才创建新的controller和超时
+    if (!signal) {
+      controller = new AbortController();
+      signal = controller.signal;
+      timeoutId = setTimeout(() => controller!.abort(), 10000); // 10秒超时
     }
 
-    return response.json();
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers,
+        signal,
+      });
+
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('请求超时或被取消');
+      }
+      throw error;
+    }
   }
 
   // 认证相关API
-  async login(username: string, password: string) {
+  async login(username: string, password: string, deviceId?: string) {
+    const requestBody: any = { username, password };
+    if (deviceId) {
+      requestBody.device_id = deviceId;
+    }
+    
     const response = await this.request<{
       success: boolean;
       message: string;
       data: { access_token: string; user: any };
     }>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify(requestBody),
     });
     
     if (response.success && response.data.access_token) {
@@ -103,6 +135,7 @@ class ApiClient {
 
   // 设备相关API
   async registerDevice(deviceInfo: {
+    device_id?: string;
     name: string;
     platform: string;
     version: string;
@@ -125,12 +158,14 @@ class ApiClient {
     });
   }
 
-  async getDevices() {
+  async getDevices(signal?: AbortSignal) {
     return this.request<{
       success: boolean;
       message: string;
       data: { items: any[]; pagination: any };
-    }>('/devices');
+    }>('/devices', {
+      signal,
+    });
   }
 
   async updateDevice(deviceId: string, updateData: { name?: string }) {
@@ -155,16 +190,18 @@ class ApiClient {
   }
 
   // 剪贴板相关API
-  async getClipItems() {
+  async getClipItems(signal?: AbortSignal) {
     return this.request<{
       success: boolean;
       message: string;
       data: { items: any[]; pagination: any };
-    }>('/clipboard');
+    }>('/clips', {
+      signal,
+    });
   }
 
   async createClipItem(clipData: {
-    content_type: string;
+    type: string;
     content?: string;
     file_path?: string;
     metadata?: any;
@@ -173,7 +210,7 @@ class ApiClient {
       success: boolean;
       message: string;
       data: any;
-    }>('/clipboard', {
+    }>('/clips', {
       method: 'POST',
       body: JSON.stringify(clipData),
     });

@@ -12,8 +12,9 @@ import (
 
 // WebSocketService WebSocket 服务
 type WebSocketService struct {
-	Manager *Manager
-	Handler *Handler
+	Manager  *Manager
+	Handler  *Handler
+	services *services.Services
 }
 
 // NewWebSocketService 创建 WebSocket 服务
@@ -22,8 +23,9 @@ func NewWebSocketService(services *services.Services) *WebSocketService {
 	handler := NewHandler(manager, services.User, services.Device)
 
 	return &WebSocketService{
-		Manager: manager,
-		Handler: handler,
+		Manager:  manager,
+		Handler:  handler,
+		services: services,
 	}
 }
 
@@ -42,7 +44,7 @@ func (ws *WebSocketService) Stop() {
 // RegisterRoutes 注册 WebSocket 路由
 func (ws *WebSocketService) RegisterRoutes(router *gin.RouterGroup) {
 	// 应用 WebSocket 中间件
-	middleware.SetupWebSocketMiddlewares(router, nil)
+	middleware.SetupWebSocketMiddlewares(router, ws.services.GetDB())
 
 	// 注册路由
 	ws.Handler.RegisterRoutes(router)
