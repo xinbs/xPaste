@@ -20,7 +20,8 @@ interface DeviceCapabilities {
 }
 
 interface Device {
-  id: string;
+  id: number;           // 数据库主键
+  device_id: string;    // 设备标识符
   name: string;
   platform: string;
   version: string;
@@ -210,41 +211,79 @@ export const useAuthStore = create<AuthState>()(
 
       fetchDevices: async (signal?: AbortSignal) => {
         set({ isLoading: true, error: null });
+        console.log('设备Store: 开始获取设备列表...');
+        
         try {
           const response = await apiClient.getDevices(signal);
+          console.log('设备Store: API响应', {
+            success: response.success,
+            message: response.message,
+            deviceCount: response.data?.items?.length || 0,
+            fullResponse: response
+          });
+          
           if (response.success) {
             const devices = response.data.items;
-            console.log('API response:', response);
-            console.log('Fetched devices from API:', devices);
+            console.log('设备Store: 成功获取', devices.length, '个设备');
             const { currentDevice } = get();
             
             // 检查currentDevice是否仍然存在于设备列表中
             let updatedCurrentDevice = currentDevice;
             if (currentDevice && devices.length > 0 && !devices.find(device => device.id === currentDevice.id)) {
-              // 只有当设备列表不为空且currentDevice不在其中时，才可能需要处理
-              // 但为了避免状态不一致，我们保持currentDevice不变
-              console.warn('Current device not found in device list, but keeping current device to avoid state loss');
+              console.warn('当前设备不在设备列表中，但保持currentDevice状态以避免数据丢失');
             }
-            // 注意：我们不再在设备列表为空时清除currentDevice，因为这可能是临时的API问题
             
             set({
               devices,
               currentDevice: updatedCurrentDevice,
               isLoading: false,
+              error: null, // 清除错误状态
             });
           } else {
+            console.error('设备Store: API返回失败', response.message);
             set({ error: response.message, isLoading: false });
+            // 只有在真正失败时才显示错误
+            useToastStore.getState().showError('获取设备列表失败', response.message);
           }
         } catch (error) {
           if (error instanceof Error && error.name === 'AbortError') {
-            // 请求被取消，不显示错误
+            console.log('设备Store: 请求被取消');
             set({ isLoading: false });
             return;
           }
+          
+          console.error('设备Store: 网络请求异常', {
+            error,
+            message: error instanceof Error ? error.message : '未知错误',
+            stack: error instanceof Error ? error.stack : undefined
+          });
+          
           const errorMessage = error instanceof Error ? error.message : '获取设备列表失败';
           set({ error: errorMessage, isLoading: false });
-          useToastStore.getState().showError('获取设备列表失败', errorMessage);
-          throw error; // 重新抛出错误，让App.tsx能够捕获
+          
+          // 检查是否是网络错误
+          const isNetworkError = error instanceof Error && (
+            error.message.includes('fetch') ||
+            error.message.includes('Failed to fetch') ||
+            error.message.includes('NetworkError') ||
+            error.message.includes('ERR_NETWORK') ||
+            error.message.includes('请求超时或被取消')
+          );
+          
+          if (isNetworkError) {
+            console.log('检测到网络错误，延迟3秒后检查是否需要显示错误提示');
+            // 延迟检查，给其他请求重试的机会
+            setTimeout(() => {
+              const currentState = get();
+              // 只有在3秒后仍然有错误且没有设备数据时才显示错误
+              if (currentState.error && currentState.devices.length === 0) {
+                useToastStore.getState().showError('获取设备列表失败', errorMessage);
+              }
+            }, 3000);
+          } else {
+            useToastStore.getState().showError('获取设备列表失败', errorMessage);
+            throw error; // 只有在非网络错误时才重新抛出
+          }
         }
       },
 
@@ -256,9 +295,9 @@ export const useAuthStore = create<AuthState>()(
             // 更新本地设备列表
             const { devices, currentDevice } = get();
             const updatedDevices = devices.map(device => 
-              device.id === deviceId ? { ...device, name: newName } : device
+              device.device_id === deviceId ? { ...device, name: newName } : device
             );
-            const updatedCurrentDevice = currentDevice?.id === deviceId 
+            const updatedCurrentDevice = currentDevice?.device_id === deviceId 
               ? { ...currentDevice, name: newName } 
               : currentDevice;
             
@@ -287,7 +326,7 @@ export const useAuthStore = create<AuthState>()(
           if (response.success) {
             // 从本地设备列表中移除
             const { devices } = get();
-            const updatedDevices = devices.filter(device => device.id !== deviceId);
+            const updatedDevices = devices.filter(device => device.device_id !== deviceId);
             set({ devices: updatedDevices, isLoading: false });
             return true;
           } else {

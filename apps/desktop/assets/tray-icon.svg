@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 简化的剪贴板图标，适合托盘显示 -->
+  
+  <!-- 剪贴板背景 -->
+  <rect x="3" y="2" width="10" height="12" rx="1" fill="#ffffff" stroke="#374151" stroke-width="0.8"/>
+  
+  <!-- 剪贴板夹子 -->
+  <rect x="6" y="1" width="4" height="2.5" rx="0.5" fill="#3b82f6" stroke="#ffffff" stroke-width="0.3"/>
+  
+  <!-- 文档线条 -->
+  <line x1="5" y1="6" x2="11" y2="6" stroke="#6b7280" stroke-width="0.8" stroke-linecap="round"/>
+  <line x1="5" y1="8" x2="10" y2="8" stroke="#6b7280" stroke-width="0.8" stroke-linecap="round"/>
+  <line x1="5" y1="10" x2="11" y2="10" stroke="#6b7280" stroke-width="0.8" stroke-linecap="round"/>
+  
+  <!-- X 标记 (代表 xPaste) -->
+  <g transform="translate(8, 11)">
+    <path d="M1 1 L3 3 M3 1 L1 3" stroke="#3b82f6" stroke-width="1" stroke-linecap="round"/>
+  </g>
+</svg>

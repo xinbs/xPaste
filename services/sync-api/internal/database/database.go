@@ -79,8 +79,8 @@ func Initialize(cfg *config.Config) error {
 	if cfg.Database.Driver == "sqlite" {
 		// SQLite在WAL模式下支持多个读连接和一个写连接
 		// 设置合理的连接数以支持并发用户访问
-		sqlDB.SetMaxOpenConns(10)  // 允许最多10个并发连接
-		sqlDB.SetMaxIdleConns(5)   // 保持5个空闲连接
+		sqlDB.SetMaxOpenConns(10) // 允许最多10个并发连接
+		sqlDB.SetMaxIdleConns(5)  // 保持5个空闲连接
 	} else {
 		sqlDB.SetMaxOpenConns(cfg.Database.MaxOpenConns)
 		sqlDB.SetMaxIdleConns(cfg.Database.MaxIdleConns)
@@ -98,31 +98,10 @@ func Initialize(cfg *config.Config) error {
 }
 
 // Migrate 执行数据库迁移
+// 已弃用：请使用 MigrateDatabase() 函数
 func Migrate() error {
-	if DB == nil {
-		return fmt.Errorf("database not initialized")
-	}
-
-	// 自动迁移所有模型
-	err := DB.AutoMigrate(
-		&models.User{},
-		&models.Device{},
-		&models.ClipItem{},
-		&models.OcrResult{},
-		&models.Setting{},
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to migrate database: %w", err)
-	}
-
-	// 创建索引
-	if err := createIndexes(); err != nil {
-		return fmt.Errorf("failed to create indexes: %w", err)
-	}
-
-	log.Println("Database migration completed successfully")
-	return nil
+	log.Println("Warning: Migrate() is deprecated, using MigrateDatabase() instead")
+	return MigrateDatabase()
 }
 
 // createIndexes 创建数据库索引
@@ -200,7 +179,6 @@ func createIndexes() error {
 		return err
 	}
 
-
 	// 复合索引
 	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_clip_items_user_status ON clip_items(user_id, status)").Error; err != nil {
 		return err
@@ -211,7 +189,6 @@ func createIndexes() error {
 	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_settings_user_key ON settings(user_id, key)").Error; err != nil {
 		return err
 	}
-
 
 	return nil
 }

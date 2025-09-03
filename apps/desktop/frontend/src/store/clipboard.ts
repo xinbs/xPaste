@@ -47,22 +47,65 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
 
   fetchItems: async (signal?: AbortSignal) => {
     set({ isLoading: true, error: null });
+    console.log('剪贴板Store: 开始获取剪贴板历史...');
+    
     try {
       const response = await apiClient.getClipItems(signal);
+      console.log('剪贴板Store: API响应', {
+        success: response.success,
+        message: response.message,
+        dataLength: response.data?.items?.length || 0,
+        fullResponse: response
+      });
+      
       if (response.success) {
-        set({ items: response.data.items || [], isLoading: false });
+        const items = response.data.items || [];
+        console.log('剪贴板Store: 成功获取', items.length, '条历史记录');
+        set({ items, isLoading: false, error: null }); // 清除错误状态
       } else {
+        console.error('剪贴板Store: API返回失败', response.message);
         set({ error: response.message, isLoading: false });
+        // 只有在真正失败时才显示错误
+        useToastStore.getState().showError('获取剪贴板历史失败', response.message);
       }
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        // 请求被取消，不显示错误
+        console.log('剪贴板Store: 请求被取消');
         set({ isLoading: false });
         return;
       }
+      
+      console.error('剪贴板Store: 网络请求异常', {
+        error,
+        message: error instanceof Error ? error.message : '未知错误',
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      
       const errorMessage = error instanceof Error ? error.message : '获取剪贴板历史失败';
       set({ error: errorMessage, isLoading: false });
-      useToastStore.getState().showError('获取剪贴板历史失败', errorMessage);
+      
+      // 检查是否是网络错误
+      const isNetworkError = error instanceof Error && (
+        error.message.includes('fetch') ||
+        error.message.includes('Failed to fetch') ||
+        error.message.includes('NetworkError') ||
+        error.message.includes('ERR_NETWORK') ||
+        error.message.includes('请求超时或被取消')
+      );
+      
+      if (isNetworkError) {
+        console.log('检测到网络错误，延迟3秒后检查是否需要显示错误提示');
+        // 延迟检查，给其他请求重试的机会
+        setTimeout(() => {
+          const currentState = get();
+          // 只有在3秒后仍然有错误且没有数据时才显示错误
+          if (currentState.error && currentState.items.length === 0) {
+            useToastStore.getState().showError('获取剪贴板历史失败', errorMessage);
+          }
+        }, 3000);
+      } else {
+        useToastStore.getState().showError('获取剪贴板历史失败', errorMessage);
+      }
     }
   },
 
@@ -133,8 +176,17 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
   },
 
   startMonitoring: () => {
-    if (monitoringInterval) return;
+    console.log('剪贴板Store: 尝试启动监听 - 当前状态:', { 
+      monitoringInterval: !!monitoringInterval,
+      isMonitoring: get().isMonitoring 
+    });
     
+    if (monitoringInterval) {
+      console.log('剪贴板Store: 监听已在运行，跳过');
+      return;
+    }
+    
+    console.log('剪贴板Store: 启动剪贴板监听...');
     set({ isMonitoring: true });
     
     // 初始化当前剪贴板内容

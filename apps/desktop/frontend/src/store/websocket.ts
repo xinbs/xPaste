@@ -66,7 +66,7 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => {
       switch (message.type) {
         case 'clipboard_sync':
           // 处理剪贴板同步消息
-          if (message.data && message.device_id !== useAuthStore.getState().currentDevice?.id) {
+          if (message.data && message.device_id !== useAuthStore.getState().currentDevice?.device_id) {
             // 只处理来自其他设备的消息
             // 使用setTimeout避免循环引用
             setTimeout(() => {
