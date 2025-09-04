@@ -1,40 +1,36 @@
-<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
   <!-- 背景圆形 -->
-  <circle cx="128" cy="128" r="120" fill="#3B82F6" stroke="#1E40AF" stroke-width="4"/>
+  <circle cx="32" cy="32" r="32" fill="url(#gradient)" />
   
-  <!-- 剪贴板主体 -->
-  <rect x="80" y="60" width="96" height="120" rx="8" fill="#F8FAFC" stroke="#64748B" stroke-width="2"/>
+  <!-- 剪贴板背景 -->
+  <rect x="16" y="12" width="32" height="40" rx="3" fill="#ffffff" stroke="#e5e7eb" stroke-width="1"/>
   
   <!-- 剪贴板夹子 -->
-  <rect x="110" y="50" width="36" height="20" rx="4" fill="#64748B"/>
-  <rect x="115" y="55" width="26" height="10" rx="2" fill="#F8FAFC"/>
+  <rect x="26" y="8" width="12" height="8" rx="2" fill="#6366f1" stroke="#ffffff" stroke-width="1"/>
   
-  <!-- 文档内容线条 -->
-  <line x1="95" y1="85" x2="161" y2="85" stroke="#64748B" stroke-width="2" stroke-linecap="round"/>
-  <line x1="95" y1="100" x2="145" y2="100" stroke="#64748B" stroke-width="2" stroke-linecap="round"/>
-  <line x1="95" y1="115" x2="155" y2="115" stroke="#64748B" stroke-width="2" stroke-linecap="round"/>
+  <!-- 文档线条 -->
+  <line x1="22" y1="22" x2="42" y2="22" stroke="#9ca3af" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="22" y1="28" x2="38" y2="28" stroke="#9ca3af" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="22" y1="34" x2="40" y2="34" stroke="#9ca3af" stroke-width="1.5" stroke-linecap="round"/>
+  
+  <!-- 复制符号 (双重方框) -->
+  <rect x="22" y="38" width="8" height="8" rx="1" fill="none" stroke="#6366f1" stroke-width="1.5"/>
+  <rect x="25" y="41" width="8" height="8" rx="1" fill="none" stroke="#8b5cf6" stroke-width="1.5"/>
   
   <!-- 同步箭头 -->
-  <g transform="translate(128, 140)">
-    <!-- 右箭头 -->
-    <path d="M-15 -8 L5 -8 L5 -12 L15 0 L5 12 L5 8 L-15 8 Z" fill="#10B981"/>
-    <!-- 左箭头 -->
-    <path d="M15 -8 L-5 -8 L-5 -12 L-15 0 L-5 12 L-5 8 L15 8 Z" fill="#EF4444" transform="translate(0, 20)"/>
+  <g transform="translate(36, 40)">
+    <!-- 向右箭头 -->
+    <path d="M2 4 L6 2 L6 3.5 L10 3.5 L10 4.5 L6 4.5 L6 6 Z" fill="#10b981"/>
+    <!-- 向左箭头 -->
+    <path d="M10 8 L6 10 L6 8.5 L2 8.5 L2 7.5 L6 7.5 L6 6 Z" fill="#10b981"/>
   </g>
   
-  <!-- 设备图标 -->
-  <g transform="translate(90, 190)">
-    <!-- 手机 -->
-    <rect x="0" y="0" width="20" height="30" rx="3" fill="#6B7280" stroke="#374151" stroke-width="1"/>
-    <rect x="2" y="3" width="16" height="20" fill="#F3F4F6"/>
-    <circle cx="10" cy="26" r="2" fill="#374151"/>
-  </g>
-  
-  <g transform="translate(146, 190)">
-    <!-- 电脑 -->
-    <rect x="0" y="5" width="30" height="18" rx="2" fill="#6B7280" stroke="#374151" stroke-width="1"/>
-    <rect x="2" y="7" width="26" height="14" fill="#F3F4F6"/>
-    <rect x="12" y="23" width="6" height="3" fill="#6B7280"/>
-    <rect x="8" y="26" width="14" height="2" rx="1" fill="#6B7280"/>
-  </g>
+  <!-- 渐变定义 -->
+  <defs>
+    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1d4ed8;stop-opacity:1" />
+    </linearGradient>
+  </defs>
 </svg>

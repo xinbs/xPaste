@@ -22,3 +22,23 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Database files
+services/sync-api/data/*
+services/sync-api/data/xpaste.db
+services/sync-api/data/xpaste.db-*
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+
+# SQLite backup files
+*.backup
+*.bak
+
+# Log files
+services/sync-api/logs/*
+*.log

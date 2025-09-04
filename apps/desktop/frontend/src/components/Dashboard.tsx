@@ -6,8 +6,10 @@ import { Copy, Monitor, LogOut, Plus, Trash2, Upload, Play, Pause, X, RefreshCw,
 import { cn } from '@/lib/utils';
 import FileUpload, { FilePreview } from '@/components/FileUpload';
 import WebSocketStatus from '@/components/WebSocketStatus';
+import WindowControls from '@/components/WindowControls';
 
 export default function Dashboard() {
+  console.log('Dashboard: 组件开始渲染...');
   const [activeTab, setActiveTab] = useState<'clipboard' | 'quickadd' | 'devices' | 'settings'>('clipboard');
   const [newClipText, setNewClipText] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -35,25 +37,55 @@ export default function Dashboard() {
   const { isConnected, connect, disconnect, onlineDevices } = useWebSocketStore();
 
   useEffect(() => {
+    console.log('Dashboard: useEffect 开始执行...');
     let isMounted = true;
     let timeoutId: NodeJS.Timeout;
     const clipItemsController = new AbortController();
     const devicesController = new AbortController();
+
+    // 监听来自托盘的 IPC 事件
+    let handleToggleMonitoring: ((event: any, enabled: boolean) => void) | null = null;
+    let handleSwitchTab: ((event: any, tab: string) => void) | null = null;
+    
+    if (window.electronAPI) {
+      // 监听托盘的剪贴板监控切换
+      handleToggleMonitoring = (event: any, enabled: boolean) => {
+        if (enabled) {
+          startMonitoring();
+        } else {
+          stopMonitoring();
+        }
+      };
+
+      // 监听托盘的标签页切换
+      handleSwitchTab = (event: any, tab: string) => {
+        setActiveTab(tab as any);
+      };
+
+      // 添加事件监听器（如果 electronAPI 支持）
+      if (typeof window.electronAPI.on === 'function') {
+        window.electronAPI.on('toggle-clipboard-monitoring', handleToggleMonitoring);
+        window.electronAPI.on('switch-to-tab', handleSwitchTab);
+      }
+    }
     
     const loadData = async () => {
-      // 添加小延迟避免与App.tsx中的初始化请求冲突
-      await new Promise(resolve => {
-        timeoutId = setTimeout(resolve, 100);
-      });
+      console.log('Dashboard: loadData 被调用 - isMounted:', isMounted);
+      if (!isMounted) {
+        console.log('Dashboard: 组件未挂载，跳过数据加载');
+        return;
+      }
       
-      if (!isMounted) return;
-      
+      console.log('Dashboard: 开始并行加载数据...');
       // 并行加载数据，使用独立的AbortController
       const promises = [];
       
       if (isMounted && !clipItemsController.signal.aborted) {
+        console.log('Dashboard: Starting to fetch clip items...');
         promises.push(
-          fetchClipItems(clipItemsController.signal).catch(error => {
+          fetchClipItems(clipItemsController.signal).then(() => {
+            console.log('Dashboard: Clip items fetched successfully');
+          }).catch(error => {
             if (error instanceof Error && error.name !== 'AbortError') {
               console.error('Failed to fetch clip items:', error);
             }
@@ -74,11 +106,17 @@ export default function Dashboard() {
       await Promise.allSettled(promises);
     };
     
+    console.log('Dashboard: 准备调用 loadData...');
     loadData();
+    console.log('Dashboard: loadData 调用完成');
     
     // 默认启动剪贴板监听
+    console.log('Dashboard: 检查剪贴板监听状态 - isMonitoring:', isMonitoring);
     if (!isMonitoring) {
+      console.log('Dashboard: 启动剪贴板监听...');
       startMonitoring();
+    } else {
+      console.log('Dashboard: 剪贴板监听已启动');
     }
     
     return () => {
@@ -88,6 +126,16 @@ export default function Dashboard() {
       }
       clipItemsController.abort();
       devicesController.abort();
+      
+      // 清理 IPC 事件监听器
+      if (window.electronAPI && typeof window.electronAPI.removeListener === 'function') {
+        if (handleToggleMonitoring) {
+          window.electronAPI.removeListener('toggle-clipboard-monitoring', handleToggleMonitoring);
+        }
+        if (handleSwitchTab) {
+          window.electronAPI.removeListener('switch-to-tab', handleSwitchTab);
+        }
+      }
     };
   }, []);
 
@@ -119,8 +167,8 @@ export default function Dashboard() {
     
     // TODO: 实现实际的文件上传
     const success = await addItem({
-      content_type: selectedFile.type.startsWith('image/') ? 'image' : 'file',
-      file_path: selectedFile.name,
+      type: selectedFile.type.startsWith('image/') ? 'image' : 'file',
+      content: selectedFile.name,
       metadata: {
         source: 'file_upload',
         file_name: selectedFile.name,
@@ -174,53 +222,25 @@ export default function Dashboard() {
   const renderClipboardTab = () => {
     return (
       <div className="h-full flex flex-col">
-        {/* 顶部控制栏 */}
-        <div className="p-4 border-b border-gray-200 bg-white">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-3">
-              <h2 className="text-xl font-semibold text-gray-900">剪贴板历史</h2>
-              <div className="flex items-center space-x-2">
-                <div className={cn(
-                  "w-2 h-2 rounded-full",
-                  isMonitoring ? "bg-green-500" : "bg-gray-400"
-                )} />
-                <span className="text-sm text-gray-600">
-                  {isMonitoring ? '监控中' : '已停止'}
-                </span>
-              </div>
-            </div>
-            <button
-              onClick={toggleMonitoring}
-              className={cn(
-                "px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2 transition-colors",
-                isMonitoring 
-                  ? "bg-red-100 text-red-700 hover:bg-red-200" 
-                  : "bg-green-100 text-green-700 hover:bg-green-200"
-              )}
-            >
-              {isMonitoring ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-              {isMonitoring ? '停止监控' : '开始监控'}
-            </button>
-          </div>
-          
-          {/* 搜索和过滤 */}
-          <div className="flex items-center space-x-4">
+        {/* 紧凑的搜索和过滤栏 */}
+        <div className="flex-shrink-0 p-2 border-b border-gray-200 bg-white">
+          <div className="flex items-center space-x-2">
             <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-3 h-3" />
               <input
                 type="text"
-                placeholder="搜索剪贴板内容..."
+                placeholder="搜索..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full pl-7 pr-2 py-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
             <select
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value as any)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="px-2 py-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
             >
-              <option value="all">所有类型</option>
+              <option value="all">全部</option>
               <option value="text">文本</option>
               <option value="image">图片</option>
               <option value="file">文件</option>
@@ -244,34 +264,38 @@ export default function Dashboard() {
         )}
 
         {/* 主内容区域 */}
-        <div className="flex-1 overflow-y-auto p-2">
+        <div className="flex-1 overflow-y-auto p-1 scrollbar-thin">
           {clipboardLoading ? (
-            <div className="flex items-center justify-center h-64">
+            <div className="flex items-center justify-center h-32">
               <div className="text-center">
-                <RefreshCw className="w-8 h-8 animate-spin text-blue-500 mx-auto mb-2" />
-                <p className="text-gray-500">加载中...</p>
+                <RefreshCw className="w-6 h-6 animate-spin text-blue-500 mx-auto mb-1" />
+                <p className="text-gray-500 text-xs">加载中...</p>
               </div>
             </div>
           ) : filteredClipItems.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-gray-500">
-              <div className="text-6xl mb-4">📋</div>
-              <p className="text-lg font-medium mb-2">暂无剪贴板记录</p>
-              <p className="text-sm">{searchQuery || typeFilter !== 'all' ? '没有匹配的记录' : '开始监控剪贴板或手动添加内容'}</p>
+            <div className="flex flex-col items-center justify-center h-32 text-gray-500">
+              <div className="text-3xl mb-2">📋</div>
+              <p className="text-sm font-medium mb-1">暂无记录</p>
+              <p className="text-xs text-center">{searchQuery || typeFilter !== 'all' ? '没有匹配的记录' : '开始监控或添加内容'}</p>
+              {/* 调试信息 */}
+              <p className="text-xs text-red-500 mt-2">
+                总数: {clipItems.length}, 过滤后: {filteredClipItems.length}
+              </p>
             </div>
           ) : (
-            <div className="grid gap-2">
+            <div className="space-y-1">
                 {filteredClipItems.map((item) => (
-                  <div key={item.id} className="bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all duration-200 group">
-                    <div className="p-3">
+                  <div key={item.id} className="bg-white rounded border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all duration-200 group">
+                    <div className="p-2">
                       <div className="flex items-start justify-between">
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center space-x-2 mb-2">
-                            <div className="flex items-center space-x-2">
-                              {item.type === 'text' && <Type className="w-4 h-4 text-blue-500" />}
-                              {item.type === 'image' && <ImageIcon className="w-4 h-4 text-green-500" />}
-                              {item.type === 'file' && <FileText className="w-4 h-4 text-purple-500" />}
+                          <div className="flex items-center space-x-1 mb-1">
+                            <div className="flex items-center space-x-1">
+                              {item.type === 'text' && <Type className="w-3 h-3 text-blue-500" />}
+                              {item.type === 'image' && <ImageIcon className="w-3 h-3 text-green-500" />}
+                              {item.type === 'file' && <FileText className="w-3 h-3 text-purple-500" />}
                               <span className={cn(
-                                "text-xs font-medium px-2 py-1 rounded-full",
+                                "text-xs font-medium px-1.5 py-0.5 rounded-full",
                                 item.type === 'text' ? "bg-blue-50 text-blue-700" :
                                 item.type === 'image' ? "bg-green-50 text-green-700" :
                                 "bg-purple-50 text-purple-700"
@@ -280,38 +304,35 @@ export default function Dashboard() {
                                  item.type === 'image' ? '图片' : '文件'}
                               </span>
                             </div>
+                            <span className="text-xs text-gray-400 truncate">
+                              {formatDate(item.created_at)}
+                            </span>
                             {item.device_name && (
-                              <span className="text-xs text-gray-500">
+                              <span className="text-xs text-gray-500 truncate hidden sm:inline">
                                 来自: {item.device_name}
                               </span>
                             )}
-                            <span className="text-xs text-gray-400">
-                              {formatDate(item.created_at)}
-                            </span>
                           </div>
                           
                           {item.type === 'text' && (
-                            <p className="text-sm text-gray-900 break-all line-clamp-3">
+                            <p className="text-xs text-gray-900 break-all line-clamp-2 leading-relaxed">
                               {item.content}
                             </p>
                           )}
                           
                           {item.type === 'image' && (
-                            <div className="space-y-2">
-                              <div className="flex items-center space-x-2">
-                                <span className="text-gray-600">图片预览:</span>
-                                {item.metadata?.size && (
-                                  <span className="text-xs text-gray-500">
-                                    ({Math.round(item.metadata.size / 1024)}KB)
-                                  </span>
-                                )}
-                              </div>
+                            <div className="space-y-1">
+                              {item.metadata?.size && (
+                                <span className="text-xs text-gray-500">
+                                  ({Math.round(item.metadata.size / 1024)}KB)
+                                </span>
+                              )}
                               {item.content && (
                                 <div className="relative inline-block">
                                   <img 
                                     src={item.content} 
                                     alt="剪贴板图片" 
-                                    className="max-w-full max-h-32 object-contain rounded border cursor-pointer hover:opacity-80 transition-opacity"
+                                    className="max-w-full max-h-16 object-contain rounded border cursor-pointer hover:opacity-80 transition-opacity"
                                     onClick={() => {
                                       // 在新窗口中打开完整图片
                                       const newWindow = window.open();
@@ -334,22 +355,22 @@ export default function Dashboard() {
                           )}
                           
                           {item.type === 'file' && (
-                            <div className="flex items-center space-x-2">
-                              <span className="text-sm text-gray-900 truncate italic">
+                            <div className="flex items-center space-x-1">
+                              <span className="text-xs text-gray-900 truncate italic">
                                 {item.file_path || '文件内容'}
                               </span>
                             </div>
                           )}
                         </div>
                         
-                        <div className="flex items-center space-x-1 ml-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center space-x-0.5 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           {item.type === 'text' && item.content && (
                             <button
                               onClick={() => handleCopyItem(item.content!)}
-                              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                               title="复制到剪贴板"
                             >
-                              <Copy className="w-4 h-4" />
+                              <Copy className="w-3 h-3" />
                             </button>
                           )}
                           {item.type === 'image' && item.content && (
@@ -371,18 +392,18 @@ export default function Dashboard() {
                                   console.error('复制图片失败:', error);
                                 }
                               }}
-                              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                               title="复制图片"
                             >
-                              <Copy className="w-4 h-4" />
+                              <Copy className="w-3 h-3" />
                             </button>
                           )}
                           <button
                             onClick={() => handleDeleteItem(item.id)}
-                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
                             title="删除"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2 className="w-3 h-3" />
                           </button>
                         </div>
                       </div>
@@ -475,7 +496,7 @@ export default function Dashboard() {
     };
 
     const startEditDevice = (device: any) => {
-      setEditingDevice(device.id);
+      setEditingDevice(device.device_id);
       setNewDeviceName(device.name);
     };
 
@@ -600,7 +621,7 @@ export default function Dashboard() {
                           </div>
                           <div className="flex-1">
                             <div className="flex items-center space-x-3 mb-2">
-                              {editingDevice === device.id ? (
+                              {editingDevice === device.device_id ? (
                                 <div className="flex items-center space-x-2">
                                   <input
                                     type="text"
@@ -609,7 +630,7 @@ export default function Dashboard() {
                                     className="text-lg font-semibold text-gray-900 bg-white border border-gray-300 rounded-lg px-3 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                     onKeyPress={(e) => {
                                       if (e.key === 'Enter') {
-                                        handleRenameDevice(device.id);
+                                        handleRenameDevice(device.device_id);
                                       } else if (e.key === 'Escape') {
                                         cancelEditDevice();
                                       }
@@ -617,7 +638,7 @@ export default function Dashboard() {
                                     autoFocus
                                   />
                                   <button
-                                    onClick={() => handleRenameDevice(device.id)}
+                                    onClick={() => handleRenameDevice(device.device_id)}
                                     className="p-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
                                     title="确认"
                                   >
@@ -672,7 +693,7 @@ export default function Dashboard() {
                           </div>
                         </div>
                         <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          {!device.is_current && editingDevice !== device.id && (
+                          {!device.is_current && editingDevice !== device.device_id && (
                             <>
                               <button
                                 onClick={() => startEditDevice(device)}
@@ -682,7 +703,7 @@ export default function Dashboard() {
                                 <Edit2 className="w-4 h-4" />
                               </button>
                               <button
-                                onClick={() => handleDeleteDevice(device.id)}
+                                onClick={() => handleDeleteDevice(device.device_id)}
                                 className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                                 title="删除设备"
                               >
@@ -949,62 +970,109 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+
+
       </div>
     );
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto py-3 sm:px-6 lg:px-8">
-        <div className="px-4 py-3 sm:px-0">
-          {/* 标签页导航 */}
-          <div className="border-b border-gray-200 mb-4">
-            <nav className="-mb-px flex justify-between items-center">
-              <div className="flex space-x-6">
+    <div className="h-screen flex flex-col bg-gray-50">
+      {/* 紧凑的顶部标签导航 - 整个区域可拖动 */}
+      <div className="flex-shrink-0 bg-white border-b border-gray-200 px-2 py-1 app-region-drag pt-7">
+        <div className="flex items-center justify-between">
+          {/* 左侧：标签导航 + 监控状态 - 禁用拖动以便交互 */}
+          <div className="flex items-center space-x-3 flex-1 min-w-0 app-region-no-drag">
+            <nav className="flex space-x-1 overflow-x-auto scrollbar-hide">
               {[
-                { key: 'clipboard', label: '剪贴板历史', icon: Copy, description: '查看和管理剪贴板内容' },
-                { key: 'quickadd', label: '快速添加', icon: Plus, description: '手动添加文本和文件到剪贴板' },
-                { key: 'devices', label: '设备管理', icon: Monitor, description: '管理连接的设备' },
-                { key: 'settings', label: '设置', icon: Settings, description: '应用程序设置' },
-              ].map(({ key, label, icon: Icon, description }) => (
+                { key: 'clipboard', label: '历史', icon: Copy, shortLabel: '历史' },
+                { key: 'quickadd', label: '添加', icon: Plus, shortLabel: '添加' },
+                { key: 'devices', label: '设备', icon: Monitor, shortLabel: '设备' },
+                { key: 'settings', label: '设置', icon: Settings, shortLabel: '设置' },
+              ].map(({ key, label, icon: Icon, shortLabel }) => (
                 <button
                   key={key}
                   onClick={() => setActiveTab(key as any)}
                   className={cn(
-                    "flex items-center space-x-2 py-2 px-3 border-b-2 font-medium text-sm rounded-t-lg transition-all duration-200",
+                    "flex items-center space-x-1 py-1.5 px-2 rounded-md font-medium text-xs transition-all duration-200 whitespace-nowrap flex-shrink-0",
                     activeTab === key
-                      ? "border-blue-500 text-blue-600 bg-blue-50"
-                      : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                      ? "bg-blue-100 text-blue-700 shadow-sm"
+                      : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
                   )}
-                  title={description}
+                  title={label}
                 >
-                  <Icon className="w-4 h-4" />
-                  <span>{label}</span>
+                  <Icon className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">{shortLabel}</span>
                 </button>
               ))}
-              </div>
-              <div className="flex items-center space-x-3">
-                <WebSocketStatus />
-                <span className="text-sm text-gray-700">欢迎, {user?.username}</span>
+            </nav>
+            
+            {/* 监控状态 - 只在剪贴板标签页显示，紧凑设计 */}
+            {activeTab === 'clipboard' && (
+              <div className="flex items-center space-x-1">
                 <button
-                  onClick={logout}
-                  className="inline-flex items-center px-2 py-1 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                  onClick={toggleMonitoring}
+                  className={cn(
+                    "px-1.5 py-0.5 rounded text-xs font-medium flex items-center space-x-1 transition-colors",
+                    isMonitoring 
+                      ? "bg-green-100 text-green-700 hover:bg-green-200" 
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  )}
+                  title={isMonitoring ? '点击停止监控' : '点击开始监控'}
                 >
-                  <LogOut className="w-4 h-4 mr-1" />
-                  退出
+                  <div className={cn(
+                    "w-1.5 h-1.5 rounded-full",
+                    isMonitoring ? "bg-green-500" : "bg-gray-400"
+                  )} />
+                  <span className="hidden sm:inline">{isMonitoring ? '监控' : '停止'}</span>
+                  {isMonitoring ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
                 </button>
               </div>
-            </nav>
+            )}
           </div>
-
-          {/* 标签页内容 */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 min-h-[600px]">
-            {activeTab === 'clipboard' && renderClipboardTab()}
-            {activeTab === 'quickadd' && renderQuickAddTab()}
-            {activeTab === 'devices' && renderDevicesTab()}
-            {activeTab === 'settings' && renderSettingsTab()}
+          
+          {/* 右侧状态和用户信息 + 窗口控制 - 禁用拖动以便交互 */}
+          <div className="flex items-center space-x-2 ml-2 flex-shrink-0 app-region-no-drag">
+            <WebSocketStatus />
+            <div className="hidden md:flex items-center space-x-2">
+              <span className="text-xs text-gray-600 truncate max-w-20" title={user?.username}>
+                {user?.username}
+              </span>
+              <button
+                onClick={logout}
+                className="inline-flex items-center px-1.5 py-1 text-xs font-medium rounded text-red-600 hover:bg-red-50 transition-colors"
+                title="退出登录"
+              >
+                <LogOut className="w-3 h-3" />
+              </button>
+            </div>
+            {/* 移动端简化版 */}
+            <div className="md:hidden">
+              <button
+                onClick={logout}
+                className="inline-flex items-center p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
+                title="退出登录"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+            
+            {/* 窗口控制按钮 - 仅在生产模式显示 */}
+            <WindowControls className="ml-2 pl-2 border-l border-gray-200" />
           </div>
         </div>
+      </div>
+
+      {/* 主内容区域 - 占满剩余空间 */}
+      <div className="flex-1 overflow-hidden">
+        {activeTab === 'clipboard' && renderClipboardTab()}
+        {activeTab === 'quickadd' && renderQuickAddTab()}
+        {activeTab === 'devices' && renderDevicesTab()}
+        {activeTab === 'settings' && (
+          <div className="h-full overflow-y-auto scrollbar-thin">
+            {renderSettingsTab()}
+          </div>
+        )}
       </div>
     </div>
   );

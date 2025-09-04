@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/store/auth';
 import { useToastStore } from '@/store/toast';
+import { getOrCreateDeviceId } from '@/lib/device';
 import { cn } from '@/lib/utils';
 
 interface DeviceSetupProps {
@@ -43,6 +44,7 @@ export default function DeviceSetup({ onComplete }: DeviceSetupProps) {
     }
 
     const deviceInfo = {
+      device_id: getOrCreateDeviceId(),
       name: deviceName.trim(),
       platform,
       version: '1.0.0',

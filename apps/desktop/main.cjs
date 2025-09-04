@@ -1,30 +1,230 @@
-const { app, BrowserWindow, Menu, shell, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain, dialog, Tray, nativeImage } = require('electron');
 const path = require('path');
+const fs = require('fs');
+
 const isDev = process.env.NODE_ENV === 'development';
+
+// 跨平台图标路径获取函数
+function getWindowIcon() {
+  const platform = process.platform;
+  const assetsDir = path.join(__dirname, 'assets');
+  
+  // Windows: 优先使用 ICO，备用 PNG
+  if (platform === 'win32') {
+    const icoPaths = [
+      path.join(assetsDir, 'icon.ico'),
+      path.join(assetsDir, 'icon.png'),
+      path.join(assetsDir, 'icon.svg')
+    ];
+    
+    for (const iconPath of icoPaths) {
+      if (fs.existsSync(iconPath)) {
+        console.log('Windows 窗口图标:', iconPath);
+        return iconPath;
+      }
+    }
+  }
+  
+  // macOS: 优先使用 ICNS，备用 PNG/SVG
+  else if (platform === 'darwin') {
+    const macPaths = [
+      path.join(assetsDir, 'icon.icns'),
+      path.join(assetsDir, 'icon.png'),
+      path.join(assetsDir, 'icon.svg')
+    ];
+    
+    for (const iconPath of macPaths) {
+      if (fs.existsSync(iconPath)) {
+        console.log('macOS 窗口图标:', iconPath);
+        return iconPath;
+      }
+    }
+  }
+  
+  // Linux: 优先使用 PNG，备用 SVG
+  else {
+    const linuxPaths = [
+      path.join(assetsDir, 'icon.png'),
+      path.join(assetsDir, 'icon.svg')
+    ];
+    
+    for (const iconPath of linuxPaths) {
+      if (fs.existsSync(iconPath)) {
+        console.log('Linux 窗口图标:', iconPath);
+        return iconPath;
+      }
+    }
+  }
+  
+  // 最后备用
+  const fallback = path.join(assetsDir, 'icon.svg');
+  console.log('使用备用图标:', fallback);
+  return fallback;
+}
+
+// 跨平台托盘图标获取函数
+function getTrayIconPaths() {
+  const platform = process.platform;
+  const assetsDir = path.join(__dirname, 'assets');
+  const resourcesPath = process.resourcesPath || path.dirname(app.getPath('exe'));
+  
+  const paths = [];
+  
+  if (platform === 'win32') {
+    // Windows: ICO 格式最佳
+    paths.push(
+      // 开发环境
+      path.join(assetsDir, 'icon.ico'),
+      path.join(assetsDir, 'tray-icon.ico'),
+      // 打包后环境
+      path.join(resourcesPath, 'icon.ico'),
+      path.join(path.dirname(app.getPath('exe')), 'resources', 'icon.ico'),
+      // PNG 备用
+      path.join(assetsDir, 'tray-icon.png'),
+      path.join(assetsDir, 'icon.png')
+    );
+  } else if (platform === 'darwin') {
+    // macOS: PNG 格式，16x16 和 32x32，Template 图标适配明暗主题
+    paths.push(
+      path.join(assetsDir, 'tray-iconTemplate.png'), // macOS 推荐的 Template 图标
+      path.join(assetsDir, 'tray-icon.png'),
+      path.join(assetsDir, 'icon.png'),
+      path.join(resourcesPath, 'tray-icon.png')
+    );
+  } else {
+    // Linux: PNG 格式
+    paths.push(
+      path.join(assetsDir, 'tray-icon.png'),
+      path.join(assetsDir, 'icon.png'),
+      path.join(resourcesPath, 'tray-icon.png')
+    );
+  }
+  
+  // SVG 作为最后备用（所有平台）
+  paths.push(path.join(assetsDir, 'icon.svg'));
+  
+  return paths;
+}
+
+// 创建跨平台备用图标
+function createFallbackTrayIcon() {
+  const platform = process.platform;
+  
+  // 根据平台设置不同的尺寸
+  let width, height;
+  if (platform === 'linux') {
+    width = height = 22;  // Linux 常用尺寸
+  } else {
+    width = height = 16;  // Windows 和 macOS
+  }
+  
+  const buffer = Buffer.alloc(width * height * 4);
+  
+  // 创建一个简洁的 "X" 图案（xPaste 的 x）
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      
+      // 绘制 X 图案，适配不同尺寸
+      const center = width / 2;
+      const thickness = Math.max(1, Math.floor(width / 16));
+      const margin = Math.floor(width * 0.2);
+      
+      const isX = (
+        (Math.abs(x - y) <= thickness || Math.abs(x - (height - 1 - y)) <= thickness) &&
+        (x >= margin && x < width - margin && y >= margin && y < height - margin)
+      );
+      
+      if (isX) {
+        if (platform === 'darwin') {
+          // macOS: 使用黑色，适配 Template 风格
+          buffer[i] = 0;       // B - 黑色
+          buffer[i + 1] = 0;   // G
+          buffer[i + 2] = 0;   // R
+          buffer[i + 3] = 255; // A
+        } else {
+          // Windows/Linux: 使用品牌色 #7C3AED
+          buffer[i] = 237;     // B
+          buffer[i + 1] = 58;  // G
+          buffer[i + 2] = 124; // R
+          buffer[i + 3] = 255; // A
+        }
+      } else {
+        // 透明背景
+        buffer[i] = 0;
+        buffer[i + 1] = 0;
+        buffer[i + 2] = 0;
+        buffer[i + 3] = 0;
+      }
+    }
+  }
+  
+  const img = nativeImage.createFromBuffer(buffer, { width, height });
+  
+  // macOS Template 图标设置
+  if (platform === 'darwin') {
+    img.setTemplateImage(true);
+  }
+  
+  console.log(`✅ 创建 ${platform} 备用托盘图标 (${width}x${height})`);
+  return img;
+}
 
 // 保持对窗口对象的全局引用，如果不这样做，当JavaScript对象被垃圾回收时，窗口将自动关闭
 let mainWindow;
 let settingsWindow;
+let tray;
 
 function createWindow() {
-  // 创建浏览器窗口
+  // 创建浏览器窗口 - 设计为紧凑的长条形剪贴板工具
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
+    width: 400,           // 较窄的宽度，适合长条形设计
+    height: 600,          // 较高的高度，便于显示历史记录列表
+    minWidth: 320,        // 最小宽度限制，保证基本可用性
+    minHeight: 400,       // 最小高度
+    maxWidth: 800,        // 最大宽度限制，避免过宽
+    resizable: true,      // 允许调整大小
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       enableRemoteModule: false,
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
       webSecurity: true,
       allowRunningInsecureContent: false
     },
-    icon: path.join(__dirname, 'assets', 'icon.png'), // 应用图标
-    show: false, // 先不显示，等加载完成后再显示
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default'
+    icon: getWindowIcon(),
+    show: false,
+    // 根据环境模式设置窗口样式
+    frame: isDev,  // 只在开发模式显示完整框架
+    titleBarStyle: process.platform === 'darwin' 
+      ? (isDev ? 'default' : 'hiddenInset')         // macOS: 开发模式默认，生产模式隐藏
+      : (isDev ? 'default' : 'hidden'),             // Windows: 开发模式默认，生产模式隐藏
+    titleBarOverlay: !isDev && process.platform === 'win32' ? {
+      color: '#ffffff',
+      symbolColor: '#374151', 
+      height: 30,
+      // 控制按钮样式
+      backgroundColor: '#f9fafb'
+    } : undefined,
+    // 窗口位置优化
+    x: undefined,
+    y: undefined,
+    // 窗口样式优化
+    transparent: false,
+    alwaysOnTop: false,
+    skipTaskbar: false,
+    // 性能优化
+    backgroundThrottling: false,
+    // Windows 特定设置
+    ...(process.platform === 'win32' && !isDev && {
+      // Windows 无框窗口的额外设置在 titleBarOverlay 中已定义
+    })
   });
+
+  // 生产模式下隐藏菜单栏
+  if (!isDev) {
+    mainWindow.setMenuBarVisibility(false);
+  }
 
   // 加载应用
   if (isDev) {
@@ -42,6 +242,32 @@ function createWindow() {
     // 如果是开发模式，聚焦到窗口
     if (isDev) {
       mainWindow.focus();
+    }
+  });
+
+  // 监听窗口状态变化
+  mainWindow.on('maximize', () => {
+    mainWindow.webContents.send('window-maximized');
+  });
+
+  mainWindow.on('unmaximize', () => {
+    mainWindow.webContents.send('window-unmaximized');
+  });
+
+  // 窗口关闭时隐藏到托盘而不是退出
+  mainWindow.on('close', (event) => {
+    if (!app.isQuiting) {
+      event.preventDefault();
+      mainWindow.hide();
+      
+      // 首次隐藏时显示提示
+      if (tray && !tray.isDestroyed()) {
+        tray.displayBalloon({
+          iconType: 'info',
+          title: 'xPaste',
+          content: '应用已最小化到系统托盘'
+        });
+      }
     }
   });
 
@@ -98,9 +324,175 @@ function createSettingsWindow() {
   });
 }
 
+// 创建系统托盘
+function createTray() {
+  let trayIcon;
+  
+  console.log('Creating tray icon for platform:', process.platform);
+  
+  // 使用跨平台图标路径函数
+  const iconCandidates = getTrayIconPaths();
+  
+  // 尝试加载图标，优先级从高到低
+  for (const iconPath of iconCandidates) {
+    try {
+      console.log('尝试加载托盘图标:', iconPath);
+      
+      // 检查文件是否存在
+      if (!fs.existsSync(iconPath)) {
+        console.log('图标文件不存在:', iconPath);
+        continue;
+      }
+      
+      const img = nativeImage.createFromPath(iconPath);
+      
+      if (img && !img.isEmpty()) {
+        // 根据平台和文件类型调整图标
+        if (process.platform === 'darwin') {
+          // macOS: 使用原始尺寸，系统会自动缩放，Template 图标自动适配主题
+          if (iconPath.includes('Template')) {
+            img.setTemplateImage(true);
+            trayIcon = img;
+            console.log('✅ 成功加载 macOS Template 托盘图标:', iconPath);
+          } else {
+            trayIcon = img.resize({ width: 16, height: 16 });
+            console.log('✅ 成功加载 macOS 托盘图标:', iconPath);
+          }
+          break;
+        } 
+        else if (process.platform === 'win32') {
+          // Windows: ICO 最佳，PNG 次之
+          if (iconPath.endsWith('.ico')) {
+            trayIcon = img.resize({ width: 16, height: 16 });
+            console.log('✅ 成功加载 Windows ICO 托盘图标:', iconPath);
+          } else {
+            trayIcon = img.resize({ width: 16, height: 16 });
+            console.log('✅ 成功加载 Windows 托盘图标:', iconPath);
+          }
+          break;
+        }
+        else {
+          // Linux: PNG 格式，22x22 或 24x24 较常见
+          trayIcon = img.resize({ width: 22, height: 22 });
+          console.log('✅ 成功加载 Linux 托盘图标:', iconPath);
+          break;
+        }
+      }
+    } catch (error) {
+      console.log('加载图标失败:', iconPath, error.message);
+      continue;
+    }
+  }
+  
+  // 如果所有图标都加载失败，创建跨平台备用图标
+  if (!trayIcon || trayIcon.isEmpty()) {
+    console.log('所有图标加载失败，创建跨平台备用图标');
+    trayIcon = createFallbackTrayIcon();
+  }
+
+  tray = new Tray(trayIcon);
+  
+  // 创建托盘菜单
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: '显示主窗口',
+      click: () => {
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) {
+            mainWindow.restore();
+          }
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }
+    },
+    {
+      type: 'separator'
+    },
+    {
+      label: '剪贴板监控',
+      type: 'checkbox',
+      checked: true,
+      click: (menuItem) => {
+        // 通过 IPC 通知渲染进程切换监控状态
+        if (mainWindow && mainWindow.webContents) {
+          mainWindow.webContents.send('toggle-clipboard-monitoring', menuItem.checked);
+        }
+      }
+    },
+    {
+      type: 'separator'
+    },
+    {
+      label: '打开设置',
+      click: () => {
+        createSettingsWindow();
+      }
+    },
+    {
+      label: '查看历史记录',
+      click: () => {
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) {
+            mainWindow.restore();
+          }
+          mainWindow.show();
+          mainWindow.focus();
+          // 切换到历史记录标签页
+          mainWindow.webContents.send('switch-to-tab', 'clipboard');
+        }
+      }
+    },
+    {
+      type: 'separator'
+    },
+    {
+      label: '关于 xPaste',
+      click: () => {
+        dialog.showMessageBox(mainWindow, {
+          type: 'info',
+          title: '关于 xPaste',
+          message: 'xPaste - 跨设备剪贴板同步工具',
+          detail: 'Version: 1.0.0\n\n一个强大的剪贴板管理和同步工具，支持跨设备同步、OCR 识别等功能。',
+          buttons: ['确定']
+        });
+      }
+    },
+    {
+      type: 'separator'
+    },
+    {
+      label: '退出应用',
+      click: () => {
+        app.isQuiting = true;
+        app.quit();
+      }
+    }
+  ]);
+
+  tray.setContextMenu(contextMenu);
+  tray.setToolTip('xPaste - 剪贴板管理工具');
+  
+  // 双击托盘图标显示/隐藏主窗口
+  tray.on('double-click', () => {
+    if (mainWindow) {
+      if (mainWindow.isVisible()) {
+        mainWindow.hide();
+      } else {
+        if (mainWindow.isMinimized()) {
+          mainWindow.restore();
+        }
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    }
+  });
+}
+
 // 当Electron完成初始化并准备创建浏览器窗口时调用此方法
 app.whenReady().then(() => {
   createWindow();
+  createTray();
 
   // 在macOS上，当点击dock图标并且没有其他窗口打开时，
   // 通常在应用程序中重新创建一个窗口。
@@ -288,6 +680,10 @@ ipcMain.handle('get-platform', () => {
   return process.platform;
 });
 
+ipcMain.handle('is-development', () => {
+  return isDev;
+});
+
 ipcMain.handle('show-save-dialog', async (event, options) => {
   const result = await dialog.showSaveDialog(mainWindow, options);
   return result;
@@ -300,6 +696,37 @@ ipcMain.handle('show-open-dialog', async (event, options) => {
 
 ipcMain.handle('open-settings-window', () => {
   createSettingsWindow();
+});
+
+// 窗口控制 IPC 处理器
+ipcMain.handle('minimize-window', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window) {
+    window.minimize();
+  }
+});
+
+ipcMain.handle('maximize-window', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window) {
+    if (window.isMaximized()) {
+      window.unmaximize();
+    } else {
+      window.maximize();
+    }
+  }
+});
+
+ipcMain.handle('unmaximize-window', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window) {
+    window.unmaximize();
+  }
+});
+
+ipcMain.handle('is-window-maximized', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  return window ? window.isMaximized() : false;
 });
 
 ipcMain.handle('close-current-window', (event) => {

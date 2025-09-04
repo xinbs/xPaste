@@ -63,36 +63,142 @@
 pnpm install
 ```
 
-### 开发命令
+## 快速启动
 
-```bash
-# 启动桌面应用开发服务器
-pnpm dev
+### 方式一：使用一键启动脚本（推荐）
 
-# 启动同步服务
-pnpm dev:sync
+#### Windows PowerShell
+```powershell
+# 启动开发环境（前端 + 后端）
+.\start-dev.ps1
 
-# 构建所有项目
-pnpm build:all
-
-# 代码检查
-pnpm lint:all
+# 停止所有服务
+.\stop-dev.ps1
 ```
 
-### 单独开发
+#### Windows 批处理
+```batch
+# 启动开发环境
+.\start-dev.bat
 
+# 停止所有服务
+.\stop-dev.bat
+```
+
+### 方式二：手动启动各个服务
+
+#### 1. 启动后端同步服务
 ```bash
-# 桌面应用
+# 在项目根目录
+cd services/sync-api
+pnpm dev
+# 或者
+go run cmd/server/main.go
+```
+
+#### 2. 启动前端开发服务器
+```bash
+# 新开一个终端，在项目根目录
 cd apps/desktop
 pnpm dev
+# 这会启动 Vite 开发服务器，通常在 http://localhost:5173
+```
 
-# 同步服务
-cd services/sync-api
-go run cmd/main.go
+#### 3. 启动 Electron 桌面应用
 
-# 共享包
-cd packages/shared-types
+**开发模式（带系统标题栏，方便调试）：**
+```bash
+# 在 apps/desktop 目录
+pnpm electron:dev
+# 或者
+NODE_ENV=development pnpm electron
+```
+
+**生产模式（自定义标题栏和窗口控制）：**
+```bash
+# 在 apps/desktop 目录
+# 1. 先构建前端
 pnpm build
+
+# 2. 启动 Electron 生产模式
+NODE_ENV=production pnpm electron
+# 或者在 Windows PowerShell
+$env:NODE_ENV="production"; pnpm electron
+```
+
+### 服务端口说明
+
+- **后端 API 服务**: http://localhost:8080
+- **前端开发服务器**: http://localhost:5173
+- **WebSocket 连接**: ws://localhost:8080/ws
+
+### 开发命令参考
+
+```bash
+# 项目根目录命令
+pnpm dev                    # 启动桌面应用前端开发服务器
+pnpm build:all              # 构建所有项目
+pnpm lint:all               # 代码检查
+
+# 桌面应用命令 (apps/desktop)
+pnpm dev                    # 启动前端开发服务器 (Vite)
+pnpm build                  # 构建前端生产版本
+pnpm electron               # 启动 Electron 应用
+pnpm electron:dev           # 启动 Electron 开发模式
+
+# 后端服务命令 (services/sync-api)
+pnpm dev                    # 启动开发服务器
+go run cmd/server/main.go   # 直接运行 Go 服务
+go run cmd/reset-db/main.go # 重置数据库（开发用）
+
+# 共享包命令 (packages/*)
+pnpm build                  # 构建包
+pnpm dev                    # 开发模式
+```
+
+### 数据库管理
+
+```bash
+# 重置数据库（清除所有数据，重新迁移）
+cd services/sync-api
+go run cmd/reset-db/main.go
+
+# 手动迁移（通常在启动时自动执行）
+# 数据库迁移会在服务启动时自动检查和执行
+```
+
+### 故障排除
+
+#### 1. 端口占用问题
+```bash
+# 检查端口占用情况
+netstat -ano | Select-String ":8080|:5173"
+
+# 手动停止占用端口的进程
+# 找到 PID 后使用
+taskkill /PID <PID> /F
+```
+
+#### 2. 数据库迁移失败
+```bash
+# 重置数据库
+cd services/sync-api
+go run cmd/reset-db/main.go
+```
+
+#### 3. 前端连接后端失败
+- 确保后端服务在 8080 端口正常运行
+- 检查前端 API 配置是否正确
+- 确认防火墙没有阻止连接
+
+#### 4. Electron 应用显示旧页面
+```bash
+# 重新构建前端
+cd apps/desktop
+pnpm build
+
+# 然后重启 Electron
+NODE_ENV=production pnpm electron
 ```
 
 ## 功能特性

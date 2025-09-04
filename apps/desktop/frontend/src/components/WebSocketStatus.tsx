@@ -67,38 +67,26 @@ export default function WebSocketStatus() {
   const StatusIcon = getStatusIcon();
 
   return (
-    <div className="flex items-center space-x-2 text-sm">
+    <div className="flex items-center space-x-1 text-xs">
       <StatusIcon 
         className={cn(
-          "w-4 h-4",
+          "w-3.5 h-3.5",
           getStatusColor(),
           isConnecting && "animate-spin"
         )} 
       />
-      <span className={getStatusColor()}>
+      <span className={cn("hidden sm:inline", getStatusColor())}>
         {getStatusText()}
       </span>
       
       {error && (
-        <div className="flex items-center space-x-2">
-          <span className="text-xs text-gray-500">
-            ({reconnectAttempts}/{maxReconnectAttempts})
-          </span>
-          <button
-            onClick={handleReconnect}
-            className="text-xs text-blue-500 hover:text-blue-700 underline"
-          >
-            重试
-          </button>
-        </div>
-      )}
-      
-      {error && (
-        <div className="ml-2">
-          <div className="bg-red-50 border border-red-200 rounded px-2 py-1">
-            <p className="text-xs text-red-700">{error}</p>
-          </div>
-        </div>
+        <button
+          onClick={handleReconnect}
+          className="text-xs text-blue-500 hover:text-blue-700 ml-1"
+          title={`连接错误: ${error} (${reconnectAttempts}/${maxReconnectAttempts})`}
+        >
+          重试
+        </button>
       )}
     </div>
   );
