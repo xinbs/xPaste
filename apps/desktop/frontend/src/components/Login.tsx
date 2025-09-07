@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { useAuthStore } from '@/store/auth';
 import { useToastStore } from '@/store/toast';
+import { useConfigStore } from '@/store/config';
 import { cn } from '@/lib/utils';
+import { Settings } from 'lucide-react';
+import ServerConfig from './ServerConfig';
 
 interface LoginProps {
   onSuccess?: () => void;
@@ -9,6 +12,7 @@ interface LoginProps {
 
 export default function Login({ onSuccess }: LoginProps) {
   const [isRegisterMode, setIsRegisterMode] = useState(false);
+  const [showServerConfig, setShowServerConfig] = useState(false);
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -18,6 +22,17 @@ export default function Login({ onSuccess }: LoginProps) {
 
   const { login, register, isLoading, error, clearError, clearStorage } = useAuthStore();
   const { showSuccess, showError } = useToastStore();
+  const { serverConfig } = useConfigStore();
+
+  // 如果正在显示服务器配置界面
+  if (showServerConfig) {
+    return (
+      <ServerConfig
+        onConfigured={() => setShowServerConfig(false)}
+        onCancel={() => setShowServerConfig(false)}
+      />
+    );
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,22 +67,41 @@ export default function Login({ onSuccess }: LoginProps) {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            {isRegisterMode ? '创建账户' : '登录到 xPaste'}
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600">
-            {isRegisterMode ? '已有账户？' : '还没有账户？'}
+          <div className="flex justify-between items-start">
+            <div className="flex-1">
+              <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+                {isRegisterMode ? '创建账户' : '登录到 xPaste'}
+              </h2>
+              <p className="mt-2 text-center text-sm text-gray-600">
+                {isRegisterMode ? '已有账户？' : '还没有账户？'}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsRegisterMode(!isRegisterMode);
+                    clearError();
+                  }}
+                  className="font-medium text-blue-600 hover:text-blue-500 ml-1"
+                >
+                  {isRegisterMode ? '立即登录' : '立即注册'}
+                </button>
+              </p>
+            </div>
             <button
               type="button"
-              onClick={() => {
-                setIsRegisterMode(!isRegisterMode);
-                clearError();
-              }}
-              className="font-medium text-blue-600 hover:text-blue-500 ml-1"
+              onClick={() => setShowServerConfig(true)}
+              className="mt-6 p-2 text-gray-400 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-md"
+              title="服务器配置"
             >
-              {isRegisterMode ? '立即登录' : '立即注册'}
+              <Settings className="w-5 h-5" />
             </button>
-          </p>
+          </div>
+          
+          {/* 显示当前服务器地址 */}
+          <div className="mt-4 text-center">
+            <p className="text-xs text-gray-500">
+              服务器: {serverConfig.baseUrl}
+            </p>
+          </div>
         </div>
         
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>

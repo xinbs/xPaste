@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { useAuthStore } from './auth';
 import { useClipboardStore } from './clipboard';
 import { useToastStore } from './toast';
+import { useConfigStore } from './config';
 
 interface WebSocketMessage {
   type: 'clipboard_sync' | 'device_online' | 'device_offline' | 'ping' | 'pong';
@@ -28,9 +29,12 @@ interface WebSocketState {
   resetReconnectAttempts: () => void;
 }
 
-const WS_URL = 'ws://localhost:8080/ws';
 const PING_INTERVAL = 30000; // 30秒
 const RECONNECT_DELAY = 5000; // 5秒
+
+const getWsUrl = () => {
+  return `${useConfigStore.getState().getWsUrl()}/ws`;
+};
 
 export const useWebSocketStore = create<WebSocketState>((set, get) => {
   let pingInterval: NodeJS.Timeout | null = null;
@@ -154,7 +158,7 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => {
       set({ isConnecting: true, error: null });
       
       try {
-       const wsUrl = `${WS_URL}?device_id=${currentDevice.device_id}&token=${token}`;
+       const wsUrl = `${getWsUrl()}?device_id=${currentDevice.device_id}&token=${token}`;
        const newSocket = new WebSocket(wsUrl);
        set({ socket: newSocket });
 

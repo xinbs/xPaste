@@ -16,6 +16,10 @@ export const SETTING_KEYS = {
   USER_OCR_LANGUAGE: 'user.ocr_language',
   USER_NOTIFICATIONS: 'user.notifications',
   USER_HOTKEYS: 'user.hotkeys',
+  USER_AUTO_CLEANUP: 'user.auto_cleanup',
+  USER_CLEANUP_PERIOD: 'user.cleanup_period',
+  // 服务器设置
+  SERVER_URL: 'server.url',
 } as const;
 
 // 设置分组
@@ -66,16 +70,20 @@ export const useSettingsStore = create<SettingsState>()((
       
       // 获取设置
       fetchSettings: async (category?: string) => {
+        console.log('开始获取设置...', { category });
         set({ isLoading: true, error: null });
         try {
           const settings = await settingsApi.getUserSettings(category);
-          const settingsMap = settings.reduce((acc, setting) => {
+          console.log('API返回的设置:', settings);
+          const settingsMap = (settings || []).reduce((acc, setting) => {
             acc[setting.key] = setting;
             return acc;
           }, {} as Record<string, Setting>);
+          console.log('设置映射:', settingsMap);
           
           set({ settings: settingsMap, isLoading: false });
         } catch (error) {
+          console.error('获取设置失败:', error);
           const errorMessage = error instanceof Error ? error.message : '获取设置失败';
           set({ error: errorMessage, isLoading: false });
           useToastStore.getState().showError('获取设置失败', errorMessage);
@@ -86,25 +94,37 @@ export const useSettingsStore = create<SettingsState>()((
       getSetting: (key: string, defaultValue?: any) => {
         const { settings } = get();
         const setting = settings[key];
+        console.log(`获取设置 ${key}:`, {
+          found: !!setting,
+          setting: setting,
+          defaultValue: defaultValue,
+          allSettings: Object.keys(settings)
+        });
         if (!setting) return defaultValue;
         
         // 根据类型转换值
+        let convertedValue;
         switch (setting.type) {
           case 'boolean':
-            return setting.value === 'true';
+            convertedValue = setting.value === 'true';
+            break;
           case 'number':
-            return Number(setting.value);
+            convertedValue = Number(setting.value);
+            break;
           case 'json':
           case 'array':
           case 'object':
             try {
-              return JSON.parse(setting.value);
+              convertedValue = JSON.parse(setting.value);
             } catch {
-              return defaultValue;
+              convertedValue = defaultValue;
             }
+            break;
           default:
-            return setting.value;
+            convertedValue = setting.value;
         }
+        console.log(`设置 ${key} 转换后的值:`, convertedValue);
+        return convertedValue;
       },
       
       // 设置单个设置

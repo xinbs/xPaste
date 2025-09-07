@@ -1,0 +1,87 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>xPaste 登录测试</title>
+</head>
+<body>
+    <h1>xPaste 登录和设置测试</h1>
+    <div>
+        <h2>1. 登录测试</h2>
+        <button onclick="testLogin()">测试登录 (xinbs/123456)</button>
+        <div id="loginResult"></div>
+    </div>
+    <div>
+        <h2>2. 获取设置测试</h2>
+        <button onclick="testGetSettings()">获取用户设置</button>
+        <div id="settingsResult"></div>
+    </div>
+    <div>
+        <h2>3. 检查localStorage</h2>
+        <button onclick="checkStorage()">检查本地存储</button>
+        <div id="storageResult"></div>
+    </div>
+
+    <script>
+        let token = null;
+        
+        async function testLogin() {
+            try {
+                const response = await fetch('http://localhost:8080/api/v1/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: 'xinbs',
+                        password: '123456',
+                        device_id: 'test-device-' + Date.now()
+                    })
+                });
+                const data = await response.json();
+                document.getElementById('loginResult').innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+                if (data.success && data.data.access_token) {
+                    token = data.data.access_token;
+                    // 保存到localStorage模拟前端行为
+                    const authData = {
+                        state: {
+                            user: data.data.user,
+                            isAuthenticated: true,
+                            token: token
+                        },
+                        version: 0
+                    };
+                    localStorage.setItem('auth-storage', JSON.stringify(authData));
+                }
+            } catch (error) {
+                document.getElementById('loginResult').innerHTML = 'Error: ' + error.message;
+            }
+        }
+        
+        async function testGetSettings() {
+            if (!token) {
+                document.getElementById('settingsResult').innerHTML = '请先登录获取token';
+                return;
+            }
+            try {
+                const response = await fetch('http://localhost:8080/api/v1/settings/user', {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    }
+                });
+                const data = await response.json();
+                document.getElementById('settingsResult').innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+            } catch (error) {
+                document.getElementById('settingsResult').innerHTML = 'Error: ' + error.message;
+            }
+        }
+        
+        function checkStorage() {
+            const authStorage = localStorage.getItem('auth-storage');
+            const settingsStorage = localStorage.getItem('settings-storage');
+            document.getElementById('storageResult').innerHTML = 
+                '<h4>Auth Storage:</h4><pre>' + (authStorage || 'null') + '</pre>' +
+                '<h4>Settings Storage:</h4><pre>' + (settingsStorage || 'null') + '</pre>';
+        }
+    </script>
+</body>
+</html>

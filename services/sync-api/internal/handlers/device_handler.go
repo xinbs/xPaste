@@ -8,7 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"xpaste-sync/internal/middleware"
 	"xpaste-sync/internal/models"
 	"xpaste-sync/internal/services"
 )
@@ -515,7 +514,6 @@ func (h *DeviceHandler) GetDeviceStats(c *gin.Context) {
 // RegisterRoutes 注册设备相关路由
 func (h *DeviceHandler) RegisterRoutes(router *gin.RouterGroup) {
 	devices := router.Group("/devices")
-	devices.Use(middleware.AuthMiddleware(h.db)) // 所有设备接口都需要认证
 	{
 		devices.POST("/register", h.RegisterDevice)
 		devices.GET("", h.GetDevices)

@@ -46,6 +46,21 @@ class SettingsWindow {
   getSettingsHTML() {
     return `
       <div class="settings-section">
+        <h2>服务器配置</h2>
+        <div class="setting-item">
+          <label>
+            <span>服务器地址</span>
+          </label>
+          <div class="server-config-group">
+            <input type="text" id="serverUrl" placeholder="http://localhost:8080" class="server-input" />
+            <button id="testConnection" class="btn-test">测试连接</button>
+          </div>
+          <p class="setting-desc">配置同步服务器的地址，用于云端数据同步</p>
+          <div id="connectionStatus" class="connection-status"></div>
+        </div>
+      </div>
+      
+      <div class="settings-section">
         <h2>同步设置</h2>
         <div class="setting-item">
           <label>
@@ -180,6 +195,80 @@ class SettingsWindow {
           transition: border-color 0.2s ease;
         }
         
+        .server-config-group {
+          display: flex;
+          gap: 10px;
+          align-items: center;
+          margin-top: 8px;
+        }
+        
+        .server-input {
+          flex: 1;
+          padding: 10px 12px;
+          border: 2px solid #e1e5e9;
+          border-radius: 6px;
+          font-size: 14px;
+          transition: border-color 0.2s ease;
+        }
+        
+        .server-input:focus {
+          outline: none;
+          border-color: #3498db;
+        }
+        
+        .btn-test {
+          padding: 10px 16px;
+          background: #3498db;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 500;
+          transition: all 0.2s ease;
+        }
+        
+        .btn-test:hover {
+          background: #2980b9;
+          transform: translateY(-1px);
+        }
+        
+        .btn-test:disabled {
+          background: #bdc3c7;
+          cursor: not-allowed;
+          transform: none;
+        }
+        
+        .connection-status {
+          margin-top: 8px;
+          padding: 8px 12px;
+          border-radius: 4px;
+          font-size: 13px;
+          font-weight: 500;
+        }
+        
+        .connection-status.success {
+          background: #d4edda;
+          color: #155724;
+          border: 1px solid #c3e6cb;
+        }
+        
+        .connection-status.error {
+          background: #f8d7da;
+          color: #721c24;
+          border: 1px solid #f5c6cb;
+        }
+        
+        .connection-status.testing {
+          background: #d1ecf1;
+          color: #0c5460;
+          border: 1px solid #bee5eb;
+        }
+        
+        .connection-status:empty {
+          display: none;
+        }
+        
         .setting-item input[type="number"]:focus {
           outline: none;
           border-color: #3498db;
@@ -269,6 +358,11 @@ class SettingsWindow {
     document.getElementById('closeWindow')?.addEventListener('click', () => {
       this.closeWindow();
     });
+    
+    // 测试服务器连接
+    document.getElementById('testConnection')?.addEventListener('click', () => {
+      this.testServerConnection();
+    });
   }
 
   loadSettings() {
@@ -334,12 +428,64 @@ class SettingsWindow {
     }
   }
 
+  async testServerConnection() {
+    const serverUrlInput = document.getElementById('serverUrl');
+    const testButton = document.getElementById('testConnection');
+    const statusDiv = document.getElementById('connectionStatus');
+    
+    if (!serverUrlInput || !testButton || !statusDiv) return;
+    
+    const serverUrl = serverUrlInput.value.trim();
+    if (!serverUrl) {
+      statusDiv.className = 'connection-status error';
+      statusDiv.textContent = '请输入服务器地址';
+      return;
+    }
+    
+    try {
+      // 显示测试中状态
+      testButton.disabled = true;
+      testButton.textContent = '测试中...';
+      statusDiv.className = 'connection-status testing';
+      statusDiv.textContent = '正在测试连接...';
+      
+      // 测试连接
+      const testUrl = `${serverUrl}/health`;
+      const response = await fetch(testUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 5000
+      });
+      
+      if (response.ok) {
+        statusDiv.className = 'connection-status success';
+        statusDiv.textContent = '连接成功！服务器响应正常';
+      } else {
+        statusDiv.className = 'connection-status error';
+        statusDiv.textContent = `连接失败：HTTP ${response.status}`;
+      }
+    } catch (error) {
+      statusDiv.className = 'connection-status error';
+      statusDiv.textContent = `连接失败：${error.message}`;
+    } finally {
+      // 恢复按钮状态
+      testButton.disabled = false;
+      testButton.textContent = '测试连接';
+    }
+  }
+  
   closeWindow() {
-    // 如果有electronAPI，使用它关闭窗口
-    if (window.electronAPI && window.electronAPI.closeWindow) {
-      window.electronAPI.closeWindow();
-    } else {
-      // 否则尝试关闭窗口
+    try {
+      // 通过IPC关闭设置窗口
+      if (window.electronAPI && window.electronAPI.closeSettings) {
+        window.electronAPI.closeSettings();
+      } else {
+        window.close();
+      }
+    } catch (error) {
+      console.error('关闭窗口失败:', error);
       window.close();
     }
   }

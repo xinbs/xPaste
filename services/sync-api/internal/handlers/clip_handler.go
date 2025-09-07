@@ -9,7 +9,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"xpaste-sync/internal/middleware"
 	"xpaste-sync/internal/models"
 	"xpaste-sync/internal/services"
 )
@@ -587,7 +586,6 @@ func (h *ClipHandler) SearchClips(c *gin.Context) {
 // RegisterRoutes 注册剪贴板相关路由
 func (h *ClipHandler) RegisterRoutes(router *gin.RouterGroup) {
 	clips := router.Group("/clips")
-	clips.Use(middleware.AuthMiddleware(h.db)) // 所有剪贴板接口都需要认证
 	{
 		clips.POST("", h.CreateClip)
 		clips.GET("", h.GetClips)

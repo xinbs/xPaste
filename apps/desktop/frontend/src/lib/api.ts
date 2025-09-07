@@ -1,13 +1,29 @@
-const API_BASE_URL = 'http://localhost:8080/api/v1';
+import { useConfigStore } from '@/store/config';
 
 class ApiClient {
-  private baseURL: string;
   private token: string | null = null;
 
-  constructor(baseURL: string) {
-    this.baseURL = baseURL;
-    // 从localStorage获取token
-    this.token = localStorage.getItem('access_token');
+  constructor() {
+    // 从Zustand认证存储获取token
+    this.loadTokenFromStorage();
+  }
+  
+  private loadTokenFromStorage() {
+    try {
+      const authStorage = localStorage.getItem('auth-storage');
+      if (authStorage) {
+        const authData = JSON.parse(authStorage);
+        this.token = authData.state?.token || null;
+        console.log('从存储加载token:', this.token ? 'Token已加载' : '未找到token');
+      }
+    } catch (error) {
+      console.error('加载token失败:', error);
+      this.token = null;
+    }
+  }
+  
+  private getBaseURL(): string {
+    return useConfigStore.getState().getApiUrl();
   }
 
   // 公共HTTP方法
@@ -37,19 +53,47 @@ class ApiClient {
 
   setToken(token: string) {
     this.token = token;
-    localStorage.setItem('access_token', token);
+    // 更新Zustand认证存储中的token
+    try {
+      const authStorage = localStorage.getItem('auth-storage');
+      if (authStorage) {
+        const authData = JSON.parse(authStorage);
+        authData.state.token = token;
+        localStorage.setItem('auth-storage', JSON.stringify(authData));
+      }
+    } catch (error) {
+      console.error('更新token失败:', error);
+    }
   }
 
   clearToken() {
     this.token = null;
-    localStorage.removeItem('access_token');
+    // 清除Zustand认证存储中的token
+    try {
+      const authStorage = localStorage.getItem('auth-storage');
+      if (authStorage) {
+        const authData = JSON.parse(authStorage);
+        if (authData.state) {
+          authData.state.token = null;
+          authData.state.isAuthenticated = false;
+          localStorage.setItem('auth-storage', JSON.stringify(authData));
+        }
+      }
+    } catch (error) {
+      console.error('清除token失败:', error);
+    }
+  }
+  
+  // 刷新token（从存储重新加载）
+  refreshToken() {
+    this.loadTokenFromStorage();
   }
 
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const url = `${this.baseURL}${endpoint}`;
+    const url = `${this.getBaseURL()}${endpoint}`;
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
       ...options.headers,
@@ -220,7 +264,7 @@ class ApiClient {
     const formData = new FormData();
     formData.append('file', file);
     
-    const url = `${this.baseURL}/files/upload`;
+    const url = `${this.getBaseURL()}/files/upload`;
     const headers: HeadersInit = {};
 
     if (this.token) {
@@ -253,5 +297,5 @@ class ApiClient {
   }
 }
 
-export const apiClient = new ApiClient(API_BASE_URL);
+export const apiClient = new ApiClient();
 export default apiClient;

@@ -121,6 +121,8 @@ const (
 	SettingKeyUserOCRLanguage    = "user.ocr_language"
 	SettingKeyUserNotifications  = "user.notifications"
 	SettingKeyUserHotkeys        = "user.hotkeys"
+	SettingKeyUserAutoCleanup    = "user.auto_cleanup"
+	SettingKeyUserCleanupPeriod  = "user.cleanup_period"
 )
 
 // CreateSettingRequest 创建设置请求

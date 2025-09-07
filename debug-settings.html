@@ -1,0 +1,131 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>xPaste 设置调试</title>
+</head>
+<body>
+    <h1>xPaste 设置存储调试</h1>
+    <div>
+        <h2>1. 检查localStorage</h2>
+        <button onclick="checkLocalStorage()">检查本地存储</button>
+        <div id="storageResult"></div>
+    </div>
+    <div>
+        <h2>2. 模拟登录并获取设置</h2>
+        <button onclick="loginAndFetchSettings()">登录并获取设置</button>
+        <div id="loginResult"></div>
+    </div>
+    <div>
+        <h2>3. 直接访问前端应用</h2>
+        <button onclick="openFrontend()">打开前端应用</button>
+    </div>
+
+    <script>
+        function checkLocalStorage() {
+            const authStorage = localStorage.getItem('auth-storage');
+            const settingsStorage = localStorage.getItem('settings-storage');
+            
+            let result = '<h3>认证存储:</h3>';
+            if (authStorage) {
+                try {
+                    const parsed = JSON.parse(authStorage);
+                    result += '<pre>' + JSON.stringify(parsed, null, 2) + '</pre>';
+                } catch (e) {
+                    result += '<p style="color: red;">解析失败: ' + e.message + '</p>';
+                }
+            } else {
+                result += '<p style="color: orange;">未找到认证存储</p>';
+            }
+            
+            result += '<h3>设置存储:</h3>';
+            if (settingsStorage) {
+                try {
+                    const parsed = JSON.parse(settingsStorage);
+                    result += '<pre>' + JSON.stringify(parsed, null, 2) + '</pre>';
+                } catch (e) {
+                    result += '<p style="color: red;">解析失败: ' + e.message + '</p>';
+                }
+            } else {
+                result += '<p style="color: orange;">未找到设置存储</p>';
+            }
+            
+            document.getElementById('storageResult').innerHTML = result;
+        }
+        
+        async function loginAndFetchSettings() {
+            try {
+                // 1. 登录
+                const loginResponse = await fetch('http://localhost:8080/api/v1/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: 'xinbs',
+                        password: '123456',
+                        device_id: 'debug-device-' + Date.now()
+                    })
+                });
+                const loginData = await loginResponse.json();
+                
+                if (!loginData.success) {
+                    document.getElementById('loginResult').innerHTML = '<p style="color: red;">登录失败: ' + loginData.message + '</p>';
+                    return;
+                }
+                
+                const token = loginData.data.access_token;
+                
+                // 2. 获取设置
+                const settingsResponse = await fetch('http://localhost:8080/api/v1/settings/user', {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    }
+                });
+                const settingsData = await settingsResponse.json();
+                
+                // 3. 显示结果
+                let result = '<h3>登录成功:</h3>';
+                result += '<p>用户: ' + loginData.data.user.username + '</p>';
+                result += '<p>Token: ' + token.substring(0, 20) + '...</p>';
+                
+                result += '<h3>设置数据:</h3>';
+                if (settingsData.success) {
+                    result += '<pre>' + JSON.stringify(settingsData.data, null, 2) + '</pre>';
+                    
+                    // 4. 模拟前端设置存储格式
+                    const settingsMap = {};
+                    settingsData.data.forEach(setting => {
+                        settingsMap[setting.key] = setting;
+                    });
+                    
+                    result += '<h3>设置映射 (前端格式):</h3>';
+                    result += '<pre>' + JSON.stringify(settingsMap, null, 2) + '</pre>';
+                    
+                    // 5. 检查最大历史记录设置
+                    const maxHistorySetting = settingsMap['user.max_history'];
+                    result += '<h3>最大历史记录设置:</h3>';
+                    if (maxHistorySetting) {
+                        result += '<p>键: ' + maxHistorySetting.key + '</p>';
+                        result += '<p>值: ' + maxHistorySetting.value + '</p>';
+                        result += '<p>类型: ' + maxHistorySetting.type + '</p>';
+                        result += '<p>转换后的值: ' + (maxHistorySetting.type === 'number' ? Number(maxHistorySetting.value) : maxHistorySetting.value) + '</p>';
+                    } else {
+                        result += '<p style="color: orange;">未找到 user.max_history 设置，将使用默认值 100</p>';
+                    }
+                } else {
+                    result += '<p style="color: red;">获取设置失败: ' + settingsData.message + '</p>';
+                }
+                
+                document.getElementById('loginResult').innerHTML = result;
+                
+            } catch (error) {
+                document.getElementById('loginResult').innerHTML = '<p style="color: red;">错误: ' + error.message + '</p>';
+            }
+        }
+        
+        function openFrontend() {
+            window.open('http://localhost:5173', '_blank');
+        }
+    </script>
+</body>
+</html>

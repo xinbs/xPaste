@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/store/auth';
 import { useClipboardStore } from '@/store/clipboard';
 import { useWebSocketStore } from '@/store/websocket';
-import { Copy, Monitor, LogOut, Plus, Trash2, Upload, Play, Pause, X, RefreshCw, Edit2, Settings, Search, Type, Image as ImageIcon, FileText } from 'lucide-react';
+import { Copy, Monitor, LogOut, Plus, Trash2, Upload, Play, Pause, X, RefreshCw, Edit2, Settings as SettingsIcon, Search, Type, Image as ImageIcon, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import FileUpload, { FilePreview } from '@/components/FileUpload';
 import WebSocketStatus from '@/components/WebSocketStatus';
 import WindowControls from '@/components/WindowControls';
+import Settings from '@/components/Settings';
 
 export default function Dashboard() {
   console.log('Dashboard: 组件开始渲染...');
@@ -508,23 +509,23 @@ export default function Dashboard() {
     return (
       <div className="h-full flex flex-col">
         {/* 顶部控制栏 */}
-        <div className="p-4 border-b border-gray-200 bg-white">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-3">
-              <h2 className="text-xl font-semibold text-gray-900">设备管理</h2>
-              <div className="flex items-center space-x-2">
-                <div className="w-2 h-2 rounded-full bg-blue-500" />
-                <span className="text-sm text-gray-600">
+        <div className="p-3 border-b border-gray-200 bg-white">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center space-x-2">
+              <h2 className="text-lg font-semibold text-gray-900">设备管理</h2>
+              <div className="flex items-center space-x-1">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                <span className="text-xs text-gray-600">
                   {devices.length} 台设备
                 </span>
               </div>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-1.5">
               <button
                 onClick={handleRefreshDevices}
-                className="px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2 transition-colors bg-blue-100 text-blue-700 hover:bg-blue-200"
+                className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center space-x-1.5 transition-colors bg-blue-100 text-blue-700 hover:bg-blue-200"
               >
-                <RefreshCw className="w-4 h-4" />
+                <RefreshCw className="w-3 h-3" />
                 刷新设备
               </button>
               <button
@@ -534,51 +535,51 @@ export default function Dashboard() {
                   e.stopPropagation();
                   handleRegisterDevice();
                 }}
-                className="px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2 transition-colors bg-green-100 text-green-700 hover:bg-green-200 cursor-pointer"
+                className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center space-x-1.5 transition-colors bg-green-100 text-green-700 hover:bg-green-200 cursor-pointer"
                 type="button"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-3 h-3" />
                 注册当前设备
               </button>
             </div>
           </div>
           
           {/* 设备统计卡片 */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg p-4 border border-blue-200">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg p-3 border border-blue-200">
               <div className="flex items-center">
-                <div className="p-2 bg-blue-500 rounded-lg">
-                  <Monitor className="w-5 h-5 text-white" />
+                <div className="p-1.5 bg-blue-500 rounded-lg">
+                  <Monitor className="w-4 h-4 text-white" />
                 </div>
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-blue-900">总设备数</p>
-                  <p className="text-2xl font-bold text-blue-700">{devices.length}</p>
+                <div className="ml-2">
+                  <p className="text-xs font-medium text-blue-900">总设备数</p>
+                  <p className="text-lg font-bold text-blue-700">{devices.length}</p>
                 </div>
               </div>
             </div>
-            <div className="bg-gradient-to-r from-green-50 to-green-100 rounded-lg p-4 border border-green-200">
+            <div className="bg-gradient-to-r from-green-50 to-green-100 rounded-lg p-3 border border-green-200">
               <div className="flex items-center">
-                <div className="p-2 bg-green-500 rounded-lg">
-                  <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
-                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                <div className="p-1.5 bg-green-500 rounded-lg">
+                  <div className="w-4 h-4 bg-white rounded-full flex items-center justify-center">
+                    <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
                   </div>
                 </div>
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-green-900">在线设备</p>
-                  <p className="text-2xl font-bold text-green-700">{onlineDevices.length}</p>
+                <div className="ml-2">
+                  <p className="text-xs font-medium text-green-900">在线设备</p>
+                  <p className="text-lg font-bold text-green-700">{onlineDevices.length}</p>
                 </div>
               </div>
             </div>
-            <div className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg p-4 border border-gray-200">
+            <div className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg p-3 border border-gray-200">
               <div className="flex items-center">
-                <div className="p-2 bg-gray-500 rounded-lg">
-                  <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
-                    <div className="w-2 h-2 bg-gray-500 rounded-full"></div>
+                <div className="p-1.5 bg-gray-500 rounded-lg">
+                  <div className="w-4 h-4 bg-white rounded-full flex items-center justify-center">
+                    <div className="w-1.5 h-1.5 bg-gray-500 rounded-full"></div>
                   </div>
                 </div>
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-gray-900">离线设备</p>
-                  <p className="text-2xl font-bold text-gray-700">{devices.length - onlineDevices.length}</p>
+                <div className="ml-2">
+                  <p className="text-xs font-medium text-gray-900">离线设备</p>
+                  <p className="text-lg font-bold text-gray-700">{devices.length - onlineDevices.length}</p>
                 </div>
               </div>
             </div>
@@ -586,48 +587,48 @@ export default function Dashboard() {
         </div>
 
         {/* 设备列表 */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-3">
           {devices.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-gray-500">
-              <div className="text-6xl mb-4">💻</div>
-              <p className="text-lg font-medium mb-2">暂无设备</p>
-              <p className="text-sm">请先注册设备以开始使用</p>
+            <div className="flex flex-col items-center justify-center h-48 text-gray-500">
+              <div className="text-4xl mb-3">💻</div>
+              <p className="text-base font-medium mb-1.5">暂无设备</p>
+              <p className="text-xs">请先注册设备以开始使用</p>
             </div>
           ) : (
-            <div className="grid gap-4">
+            <div className="grid gap-3">
               {devices.map((device) => {
                 const online = isDeviceOnline(device.device_id);
                 return (
                   <div key={device.id} className="bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-md transition-all duration-200 group">
-                    <div className="p-4">
+                    <div className="p-3">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-4">
+                        <div className="flex items-center space-x-3">
                           <div className="relative">
                             <div className={cn(
-                              "p-3 rounded-lg",
+                              "p-2 rounded-lg",
                               online ? "bg-green-100" : "bg-gray-100"
                             )}>
                               <Monitor className={cn(
-                                "w-6 h-6",
+                                "w-4 h-4",
                                 online ? "text-green-600" : "text-gray-400"
                               )} />
                             </div>
                             <div className={cn(
-                              "absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-white flex items-center justify-center",
+                              "absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white flex items-center justify-center",
                               online ? "bg-green-500" : "bg-gray-400"
                             )}>
-                              <div className="w-2 h-2 bg-white rounded-full"></div>
+                              <div className="w-1 h-1 bg-white rounded-full"></div>
                             </div>
                           </div>
                           <div className="flex-1">
-                            <div className="flex items-center space-x-3 mb-2">
+                            <div className="flex items-center space-x-2 mb-1">
                               {editingDevice === device.device_id ? (
-                                <div className="flex items-center space-x-2">
+                                <div className="flex items-center space-x-1.5">
                                   <input
                                     type="text"
                                     value={newDeviceName}
                                     onChange={(e) => setNewDeviceName(e.target.value)}
-                                    className="text-lg font-semibold text-gray-900 bg-white border border-gray-300 rounded-lg px-3 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    className="text-sm font-semibold text-gray-900 bg-white border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                                     onKeyPress={(e) => {
                                       if (e.key === 'Enter') {
                                         handleRenameDevice(device.device_id);
@@ -639,14 +640,14 @@ export default function Dashboard() {
                                   />
                                   <button
                                     onClick={() => handleRenameDevice(device.device_id)}
-                                    className="p-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
+                                    className="p-1 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
                                     title="确认"
                                   >
                                     ✓
                                   </button>
                                   <button
                                     onClick={cancelEditDevice}
-                                    className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors"
+                                    className="p-1 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors"
                                     title="取消"
                                   >
                                     ✕
@@ -654,14 +655,14 @@ export default function Dashboard() {
                                 </div>
                               ) : (
                                 <>
-                                  <h4 className="text-lg font-semibold text-gray-900">{device.name}</h4>
+                                  <h4 className="text-sm font-semibold text-gray-900">{device.name}</h4>
                                   {device.is_current && (
-                                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                                       当前设备
                                     </span>
                                   )}
                                   <span className={cn(
-                                    "inline-flex items-center px-3 py-1 rounded-full text-xs font-medium",
+                                    "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
                                     online 
                                       ? "bg-green-100 text-green-800" 
                                       : "bg-gray-100 text-gray-800"
@@ -671,7 +672,7 @@ export default function Dashboard() {
                                 </>
                               )}
                             </div>
-                            <div className="flex items-center space-x-4 text-sm text-gray-500 mb-2">
+                            <div className="flex items-center space-x-2 text-xs text-gray-500 mb-1">
                               <span>{device.platform}</span>
                               <span>•</span>
                               <span>{device.version}</span>
@@ -726,15 +727,15 @@ export default function Dashboard() {
 
   const renderQuickAddTab = () => {
     return (
-      <div className="p-6">
-        <div className="border-b border-gray-200 pb-4 mb-6">
-          <h2 className="text-xl font-bold text-gray-900">快速添加</h2>
-          <p className="text-gray-600 mt-1">手动添加文本和文件到剪贴板</p>
+      <div className="p-3">
+        <div className="border-b border-gray-200 pb-2 mb-3">
+          <h2 className="text-lg font-bold text-gray-900">快速添加</h2>
+          <p className="text-gray-600 mt-0.5 text-sm">手动添加文本和文件到剪贴板</p>
         </div>
 
         {/* 错误提示 */}
         {clipError && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3">
             <div className="flex items-center justify-between">
               <p className="text-red-700 text-sm">{clipError}</p>
               <button
@@ -748,24 +749,24 @@ export default function Dashboard() {
         )}
 
         {/* 文本添加区域 */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <Type className="w-5 h-5 mr-2" />
+        <div className="bg-white rounded-lg border border-gray-200 p-3 mb-3">
+          <h3 className="text-base font-semibold text-gray-900 mb-2 flex items-center">
+            <Type className="w-4 h-4 mr-1.5" />
             添加文本
           </h3>
-          <div className="space-y-4">
+          <div className="space-y-3">
             <textarea
               value={newClipText}
               onChange={(e) => setNewClipText(e.target.value)}
               placeholder="输入要添加到剪贴板的文本内容..."
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
-              rows={6}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-none text-sm"
+              rows={4}
             />
             <div className="flex justify-end">
               <button
                 onClick={handleAddTextItem}
                 disabled={!newClipText.trim()}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed font-medium"
+                className="px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed font-medium text-sm"
               >
                 添加到剪贴板
               </button>
@@ -774,12 +775,12 @@ export default function Dashboard() {
         </div>
 
         {/* 文件上传区域 */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <Upload className="w-5 h-5 mr-2" />
+        <div className="bg-white rounded-lg border border-gray-200 p-3">
+          <h3 className="text-base font-semibold text-gray-900 mb-2 flex items-center">
+            <Upload className="w-4 h-4 mr-1.5" />
             上传文件
           </h3>
-          <div className="space-y-4">
+          <div className="space-y-3">
             {!selectedFile ? (
               <FileUpload onFileSelect={handleFileSelect} />
             ) : (
@@ -788,16 +789,16 @@ export default function Dashboard() {
                   file={selectedFile} 
                   onRemove={() => setSelectedFile(null)} 
                 />
-                <div className="flex space-x-3">
+                <div className="flex space-x-2">
                   <button
                     onClick={handleFileUpload}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                    className="px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm"
                   >
                     确认上传
                   </button>
                   <button
                     onClick={() => setSelectedFile(null)}
-                    className="px-6 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 font-medium"
+                    className="px-4 py-1.5 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 font-medium text-sm"
                   >
                     取消
                   </button>
@@ -811,169 +812,7 @@ export default function Dashboard() {
   };
 
   const renderSettingsTab = () => {
-    return (
-      <div className="p-6 space-y-6">
-        <div className="border-b border-gray-200 pb-4">
-          <h2 className="text-2xl font-bold text-gray-900">应用设置</h2>
-          <p className="text-gray-600 mt-1">管理您的 xPaste 应用程序设置</p>
-        </div>
-
-        {/* 剪贴板设置 */}
-        <div className="bg-gray-50 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <Copy className="w-5 h-5 mr-2" />
-            剪贴板设置
-          </h3>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-sm font-medium text-gray-700">自动监控剪贴板</label>
-                <p className="text-xs text-gray-500">启动时自动开始监控剪贴板变化</p>
-              </div>
-              <button
-                className={cn(
-                  "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
-                  isMonitoring ? "bg-blue-600" : "bg-gray-200"
-                )}
-                onClick={() => isMonitoring ? stopMonitoring() : startMonitoring()}
-              >
-                <span
-                  className={cn(
-                    "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
-                    isMonitoring ? "translate-x-6" : "translate-x-1"
-                  )}
-                />
-              </button>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-sm font-medium text-gray-700">历史记录数量限制</label>
-                <p className="text-xs text-gray-500">最多保存的剪贴板历史记录数量</p>
-              </div>
-              <select className="px-3 py-1 border border-gray-300 rounded-md text-sm">
-                <option value="50">50 条</option>
-                <option value="100">100 条</option>
-                <option value="200">200 条</option>
-                <option value="500">500 条</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* 连接设置 */}
-        <div className="bg-gray-50 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <Monitor className="w-5 h-5 mr-2" />
-            连接设置
-          </h3>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-sm font-medium text-gray-700">WebSocket 连接状态</label>
-                <p className="text-xs text-gray-500">与服务器的实时连接状态</p>
-              </div>
-              <div className="flex items-center space-x-2">
-                <div className={cn(
-                  "w-2 h-2 rounded-full",
-                  isConnected ? "bg-green-500" : "bg-red-500"
-                )} />
-                <span className="text-sm text-gray-600">
-                  {isConnected ? "已连接" : "未连接"}
-                </span>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-sm font-medium text-gray-700">自动重连</label>
-                <p className="text-xs text-gray-500">连接断开时自动尝试重连</p>
-              </div>
-              <button
-                className="relative inline-flex h-6 w-11 items-center rounded-full bg-blue-600 transition-colors"
-              >
-                <span className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-6" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* 界面设置 */}
-        <div className="bg-gray-50 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <Settings className="w-5 h-5 mr-2" />
-            界面设置
-          </h3>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-sm font-medium text-gray-700">主题模式</label>
-                <p className="text-xs text-gray-500">选择应用程序的外观主题</p>
-              </div>
-              <select className="px-3 py-1 border border-gray-300 rounded-md text-sm">
-                <option value="light">浅色模式</option>
-                <option value="dark">深色模式</option>
-                <option value="auto">跟随系统</option>
-              </select>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-sm font-medium text-gray-700">启动时最小化到托盘</label>
-                <p className="text-xs text-gray-500">应用启动时自动最小化到系统托盘</p>
-              </div>
-              <button
-                className="relative inline-flex h-6 w-11 items-center rounded-full bg-gray-200 transition-colors"
-              >
-                <span className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-1" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* 数据管理 */}
-        <div className="bg-gray-50 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <Trash2 className="w-5 h-5 mr-2" />
-            数据管理
-          </h3>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-sm font-medium text-gray-700">清空剪贴板历史</label>
-                <p className="text-xs text-gray-500">删除所有保存的剪贴板历史记录</p>
-              </div>
-              <button className="px-4 py-2 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors">
-                清空历史
-              </button>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-sm font-medium text-gray-700">导出数据</label>
-                <p className="text-xs text-gray-500">将剪贴板历史导出为文件</p>
-              </div>
-              <button className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors">
-                导出数据
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* 关于信息 */}
-        <div className="bg-gray-50 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">关于 xPaste</h3>
-          <div className="space-y-2 text-sm text-gray-600">
-            <p><span className="font-medium">版本:</span> 1.0.0</p>
-            <p><span className="font-medium">作者:</span> xPaste Team</p>
-            <p><span className="font-medium">描述:</span> 跨设备剪贴板同步工具</p>
-            <div className="pt-2">
-              <button className="text-blue-600 hover:text-blue-800 text-sm underline">
-                检查更新
-              </button>
-            </div>
-          </div>
-        </div>
-
-
-      </div>
-    );
+    return <Settings />;
   };
 
   return (
@@ -988,7 +827,7 @@ export default function Dashboard() {
                 { key: 'clipboard', label: '历史', icon: Copy, shortLabel: '历史' },
                 { key: 'quickadd', label: '添加', icon: Plus, shortLabel: '添加' },
                 { key: 'devices', label: '设备', icon: Monitor, shortLabel: '设备' },
-                { key: 'settings', label: '设置', icon: Settings, shortLabel: '设置' },
+                { key: 'settings', label: '设置', icon: SettingsIcon, shortLabel: '设置' },
               ].map(({ key, label, icon: Icon, shortLabel }) => (
                 <button
                   key={key}

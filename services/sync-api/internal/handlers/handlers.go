@@ -33,6 +33,15 @@ func (h *Handlers) RegisterRoutes(router *gin.Engine) {
 	// API 路由组（不包含认证中间件）
 	api := router.Group("/api/v1")
 	{
+		// API健康检查路由
+		api.GET("/health", func(c *gin.Context) {
+			c.JSON(200, gin.H{
+				"status":  "ok",
+				"service": "xPaste Sync API",
+				"version": "1.0.0",
+			})
+		})
+
 		// 注册认证路由（包含公开和需要认证的路由）
 		h.AuthHandler.RegisterRoutes(api)
 

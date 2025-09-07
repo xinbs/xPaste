@@ -327,6 +327,77 @@ func (s *ClipService) CleanupExpiredClipItems() error {
 	return nil
 }
 
+// CleanupUserClipItemsByPeriod 根据用户设置的时间周期清理剪贴板项
+func (s *ClipService) CleanupUserClipItemsByPeriod(userID uint, cleanupPeriod string) (int64, error) {
+	if cleanupPeriod == "永久" || cleanupPeriod == "permanent" {
+		return 0, nil // 永久保存，不清理
+	}
+
+	// 计算清理时间点
+	var cutoffTime time.Time
+	now := time.Now()
+
+	switch cleanupPeriod {
+	case "7天", "7days":
+		cutoffTime = now.AddDate(0, 0, -7)
+	case "15天", "15days":
+		cutoffTime = now.AddDate(0, 0, -15)
+	case "1个月", "1month":
+		cutoffTime = now.AddDate(0, -1, 0)
+	case "3个月", "3months":
+		cutoffTime = now.AddDate(0, -3, 0)
+	case "6个月", "6months":
+		cutoffTime = now.AddDate(0, -6, 0)
+	case "1年", "1year":
+		cutoffTime = now.AddDate(-1, 0, 0)
+	default:
+		return 0, fmt.Errorf("unsupported cleanup period: %s", cleanupPeriod)
+	}
+
+	// 执行清理，删除指定时间之前创建的剪贴板项
+	result := s.db.Where("user_id = ? AND created_at < ?", userID, cutoffTime).Delete(&models.ClipItem{})
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to cleanup clip items by period: %w", result.Error)
+	}
+
+	return result.RowsAffected, nil
+}
+
+// AutoCleanupForAllUsers 为所有启用自动清理的用户执行清理
+func (s *ClipService) AutoCleanupForAllUsers() error {
+	// 查询所有启用自动清理的用户设置
+	var settings []models.Setting
+	if err := s.db.Where("key = ? AND value = ?", models.SettingKeyUserAutoCleanup, "true").Find(&settings).Error; err != nil {
+		return fmt.Errorf("failed to get auto cleanup settings: %w", err)
+	}
+
+	for _, setting := range settings {
+		// 获取用户的清理周期设置
+		var periodSetting models.Setting
+		if err := s.db.Where("user_id = ? AND key = ?", setting.UserID, models.SettingKeyUserCleanupPeriod).First(&periodSetting).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				// 如果没有设置清理周期，跳过
+				continue
+			}
+			return fmt.Errorf("failed to get cleanup period for user %d: %w", setting.UserID, err)
+		}
+
+		// 执行清理
+		deleted, err := s.CleanupUserClipItemsByPeriod(*setting.UserID, periodSetting.Value)
+		if err != nil {
+			// 记录错误但继续处理其他用户
+			fmt.Printf("Failed to cleanup for user %d: %v\n", setting.UserID, err)
+			continue
+		}
+
+		if deleted > 0 {
+			fmt.Printf("Auto cleanup: deleted %d items for user %d\n", deleted, setting.UserID)
+		}
+	}
+
+	return nil
+}
+
 // SearchClipItems 搜索剪贴板项
 func (s *ClipService) SearchClipItems(userID uint, query string, params *models.PaginationParams) ([]*models.ClipItem, *models.PaginationResponse, error) {
 	var clipItems []*models.ClipItem

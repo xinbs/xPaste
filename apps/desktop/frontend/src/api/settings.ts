@@ -44,8 +44,19 @@ export class SettingsApi {
   // 获取用户设置
   async getUserSettings(category?: string): Promise<Setting[]> {
     const url = category ? `/settings/user?category=${category}` : '/settings/user';
-    const response = await apiClient.get<{ success: boolean; data: { items: Setting[] } }>(url);
-    return response.data.items;
+    console.log('发送设置API请求:', url);
+    const response = await apiClient.get<{ success: boolean; data: Setting[] }>(url);
+    console.log('设置API完整响应:', response);
+    
+    if (!response || !response.data) {
+      console.error('设置API响应格式错误:', response);
+      return [];
+    }
+    
+    // 后端直接返回设置数组在data字段中
+    const items = response.data;
+    console.log('提取的设置项:', items);
+    return Array.isArray(items) ? items : [];
   }
 
   // 获取单个用户设置

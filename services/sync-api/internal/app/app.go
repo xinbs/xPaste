@@ -109,6 +109,9 @@ func (a *App) Run() error {
 	// 启动 WebSocket 服务
 	a.websocket.Start()
 
+	// 启动自动清理任务
+	a.startCleanupTasks()
+
 	// 启动 HTTP 服务器
 	go func() {
 		logger.Infof("Starting server on %s", a.config.GetAddr())
@@ -126,6 +129,38 @@ func (a *App) Run() error {
 
 	// 优雅关闭
 	return a.Shutdown()
+}
+
+// startCleanupTasks 启动清理任务
+func (a *App) startCleanupTasks() {
+	// 启动自动清理定时任务
+	go func() {
+		logger.Info("Starting auto cleanup task...")
+		ticker := time.NewTicker(a.config.Sync.CleanupInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				// 执行过期项清理
+				if err := a.services.Clip.CleanupExpiredClipItems(); err != nil {
+					logger.Errorf("Failed to cleanup expired clip items: %v", err)
+				}
+
+				// 执行用户自动清理
+				if err := a.services.Clip.AutoCleanupForAllUsers(); err != nil {
+					logger.Errorf("Failed to auto cleanup for users: %v", err)
+				}
+
+				// 清理离线设备
+				if err := a.services.Device.CleanupOfflineDevices(24 * time.Hour); err != nil {
+					logger.Errorf("Failed to cleanup offline devices: %v", err)
+				}
+
+				logger.Debug("Cleanup tasks completed")
+			}
+		}
+	}()
 }
 
 // Shutdown 优雅关闭应用程序

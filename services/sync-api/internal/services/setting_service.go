@@ -56,7 +56,7 @@ func (s *SettingService) GetUserSettings(userID uint, category string) ([]*model
 	if category != "" {
 		query = query.Where("category = ?", category)
 	}
-	query = query.Order("category, sort_order, key")
+	query = query.Order("category, key")
 
 	if err := query.Find(&settings).Error; err != nil {
 		return nil, fmt.Errorf("failed to get user settings: %w", err)
@@ -243,7 +243,7 @@ func (s *SettingService) GetSettingsByCategory(userID *uint, category string) ([
 	} else {
 		query = query.Where("user_id IS NULL")
 	}
-	query = query.Order("sort_order, key")
+	query = query.Order("key")
 
 	if err := query.Find(&settings).Error; err != nil {
 		return nil, fmt.Errorf("failed to get settings by category: %w", err)

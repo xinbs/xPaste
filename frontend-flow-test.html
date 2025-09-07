@@ -1,0 +1,239 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>xPaste 前端流程测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        .success { background-color: #d4edda; border-color: #c3e6cb; }
+        .error { background-color: #f8d7da; border-color: #f5c6cb; }
+        .info { background-color: #d1ecf1; border-color: #bee5eb; }
+        button { padding: 8px 16px; margin: 5px; cursor: pointer; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 3px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>xPaste 前端流程完整测试</h1>
+    
+    <div class="section">
+        <h2>步骤1: 模拟登录</h2>
+        <button onclick="simulateLogin()">执行登录</button>
+        <div id="loginStatus"></div>
+    </div>
+    
+    <div class="section">
+        <h2>步骤2: 获取用户设置</h2>
+        <button onclick="fetchUserSettings()" disabled id="fetchBtn">获取设置</button>
+        <div id="settingsStatus"></div>
+    </div>
+    
+    <div class="section">
+        <h2>步骤3: 模拟前端设置存储</h2>
+        <button onclick="simulateSettingsStore()" disabled id="storeBtn">模拟设置存储</button>
+        <div id="storeStatus"></div>
+    </div>
+    
+    <div class="section">
+        <h2>步骤4: 测试getSetting方法</h2>
+        <button onclick="testGetSetting()" disabled id="getBtn">测试获取设置</button>
+        <div id="getStatus"></div>
+    </div>
+
+    <script>
+        let authToken = null;
+        let userSettings = [];
+        let settingsMap = {};
+        
+        async function simulateLogin() {
+            const statusDiv = document.getElementById('loginStatus');
+            statusDiv.innerHTML = '<p>正在登录...</p>';
+            
+            try {
+                const response = await fetch('http://localhost:8080/api/v1/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: 'xinbs',
+                        password: '123456',
+                        device_id: 'test-device-' + Date.now()
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    authToken = data.data.access_token;
+                    statusDiv.innerHTML = `
+                        <div class="success">
+                            <h3> 登录成功</h3>
+                            <p><strong>用户:</strong> ${data.data.user.username}</p>
+                            <p><strong>Token:</strong> ${authToken.substring(0, 30)}...</p>
+                        </div>
+                    `;
+                    
+                    // 启用下一步按钮
+                    document.getElementById('fetchBtn').disabled = false;
+                    
+                    // 模拟保存到localStorage
+                    const authData = {
+                        state: {
+                            user: data.data.user,
+                            isAuthenticated: true,
+                            token: authToken
+                        },
+                        version: 0
+                    };
+                    localStorage.setItem('auth-storage', JSON.stringify(authData));
+                    
+                } else {
+                    statusDiv.innerHTML = `<div class="error"><h3> 登录失败</h3><p>${data.message}</p></div>`;
+                }
+                
+            } catch (error) {
+                statusDiv.innerHTML = `<div class="error"><h3> 登录错误</h3><p>${error.message}</p></div>`;
+            }
+        }
+        
+        async function fetchUserSettings() {
+            const statusDiv = document.getElementById('settingsStatus');
+            statusDiv.innerHTML = '<p>正在获取设置...</p>';
+            
+            try {
+                const response = await fetch('http://localhost:8080/api/v1/settings/user', {
+                    headers: {
+                        'Authorization': 'Bearer ' + authToken
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    userSettings = data.data;
+                    statusDiv.innerHTML = `
+                        <div class="success">
+                            <h3> 设置获取成功</h3>
+                            <p><strong>设置数量:</strong> ${userSettings.length}</p>
+                            <pre>${JSON.stringify(userSettings, null, 2)}</pre>
+                        </div>
+                    `;
+                    
+                    // 启用下一步按钮
+                    document.getElementById('storeBtn').disabled = false;
+                    
+                } else {
+                    statusDiv.innerHTML = `<div class="error"><h3> 获取设置失败</h3><p>${data.message}</p></div>`;
+                }
+                
+            } catch (error) {
+                statusDiv.innerHTML = `<div class="error"><h3> 获取设置错误</h3><p>${error.message}</p></div>`;
+            }
+        }
+        
+        function simulateSettingsStore() {
+            const statusDiv = document.getElementById('storeStatus');
+            
+            // 模拟前端设置存储的映射过程
+            settingsMap = {};
+            userSettings.forEach(setting => {
+                settingsMap[setting.key] = setting;
+            });
+            
+            statusDiv.innerHTML = `
+                <div class="info">
+                    <h3> 设置存储映射完成</h3>
+                    <p><strong>映射的设置键:</strong> ${Object.keys(settingsMap).join(', ')}</p>
+                    <pre>${JSON.stringify(settingsMap, null, 2)}</pre>
+                </div>
+            `;
+            
+            // 模拟保存到localStorage
+            const settingsData = {
+                state: {
+                    settings: settingsMap
+                },
+                version: 0
+            };
+            localStorage.setItem('settings-storage', JSON.stringify(settingsData));
+            
+            // 启用下一步按钮
+            document.getElementById('getBtn').disabled = false;
+        }
+        
+        function testGetSetting() {
+            const statusDiv = document.getElementById('getStatus');
+            
+            // 模拟前端的getSetting方法
+            function getSetting(key, defaultValue) {
+                const setting = settingsMap[key];
+                if (!setting) return defaultValue;
+                
+                // 根据类型转换值
+                switch (setting.type) {
+                    case 'boolean':
+                        return setting.value === 'true';
+                    case 'number':
+                        return Number(setting.value);
+                    case 'json':
+                    case 'array':
+                    case 'object':
+                        try {
+                            return JSON.parse(setting.value);
+                        } catch {
+                            return defaultValue;
+                        }
+                    default:
+                        return setting.value;
+                }
+            }
+            
+            // 测试获取最大历史记录设置
+            const maxHistoryKey = 'user.max_history';
+            const maxHistoryValue = getSetting(maxHistoryKey, 100);
+            const maxHistorySetting = settingsMap[maxHistoryKey];
+            
+            let result = `
+                <div class="info">
+                    <h3> getSetting 测试结果</h3>
+                    <p><strong>测试键:</strong> ${maxHistoryKey}</p>
+                    <p><strong>默认值:</strong> 100</p>
+            `;
+            
+            if (maxHistorySetting) {
+                result += `
+                    <p><strong>找到设置:</strong> </p>
+                    <p><strong>原始值:</strong> ${maxHistorySetting.value}</p>
+                    <p><strong>类型:</strong> ${maxHistorySetting.type}</p>
+                    <p><strong>转换后的值:</strong> ${maxHistoryValue}</p>
+                    <div class="success">
+                        <h4> 应该显示: ${maxHistoryValue}</h4>
+                    </div>
+                `;
+            } else {
+                result += `
+                    <p><strong>找到设置:</strong> </p>
+                    <p><strong>返回值:</strong> ${maxHistoryValue} (默认值)</p>
+                    <div class="error">
+                        <h4> 问题: 未找到设置，显示默认值 ${maxHistoryValue}</h4>
+                        <p>可用的设置键: ${Object.keys(settingsMap).join(', ')}</p>
+                    </div>
+                `;
+            }
+            
+            result += '</div>';
+            statusDiv.innerHTML = result;
+        }
+        
+        // 页面加载时检查localStorage
+        window.onload = function() {
+            const authStorage = localStorage.getItem('auth-storage');
+            const settingsStorage = localStorage.getItem('settings-storage');
+            
+            console.log('页面加载时的localStorage状态:');
+            console.log('auth-storage:', authStorage);
+            console.log('settings-storage:', settingsStorage);
+        };
+    </script>
+</body>
+</html>
