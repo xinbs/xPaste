@@ -104,7 +104,24 @@ pnpm dev
 # 这会启动 Vite 开发服务器，通常在 http://localhost:5173
 ```
 
-#### 3. 启动 Electron 桌面应用
+#### 3. 启动管理后台API服务
+```bash
+# 新开一个终端，在项目根目录
+cd services/admin-api
+go run main.go
+# 管理后台API服务将在 http://localhost:8081 启动
+```
+
+#### 4. 启动管理后台前端
+```bash
+# 新开一个终端，在项目根目录
+cd apps/admin-web
+pnpm install  # 首次运行需要安装依赖
+pnpm dev
+# 管理后台前端将在 http://localhost:3001 启动
+```
+
+#### 5. 启动 Electron 桌面应用
 
 **开发模式（带系统标题栏，方便调试）：**
 ```bash
@@ -128,8 +145,10 @@ $env:NODE_ENV="production"; pnpm electron
 
 ### 服务端口说明
 
-- **后端 API 服务**: http://localhost:8080
-- **前端开发服务器**: http://localhost:5173
+- **后端同步API服务**: http://localhost:8080
+- **桌面应用前端**: http://localhost:5173
+- **管理后台API服务**: http://localhost:8081
+- **管理后台前端**: http://localhost:3001
 - **WebSocket 连接**: ws://localhost:8080/ws
 
 ### 开发命令参考
@@ -151,6 +170,13 @@ pnpm dev                    # 启动开发服务器
 go run cmd/server/main.go   # 直接运行 Go 服务
 go run cmd/reset-db/main.go # 重置数据库（开发用）
 
+# 管理后台服务命令 (services/admin-api)
+go run main.go              # 启动管理后台API服务
+
+# 管理后台前端命令 (apps/admin-web)
+pnpm dev                    # 启动管理后台前端开发服务器
+pnpm build                  # 构建管理后台前端生产版本
+
 # 共享包命令 (packages/*)
 pnpm build                  # 构建包
 pnpm dev                    # 开发模式
@@ -165,6 +191,50 @@ go run cmd/reset-db/main.go
 
 # 手动迁移（通常在启动时自动执行）
 # 数据库迁移会在服务启动时自动检查和执行
+```
+
+### 管理后台测试
+
+#### 访问管理后台
+1. 确保管理后台API服务和前端都已启动
+2. 在浏览器中访问: http://localhost:3001
+3. 使用默认管理员账号登录:
+   - 用户名: `admin@example.com`
+   - 密码: `admin123`
+
+#### 功能测试
+```bash
+# 测试用户管理功能
+# 1. 登录管理后台
+# 2. 导航到用户管理页面
+# 3. 测试添加、编辑、删除用户功能
+
+# 测试设备管理功能
+# 1. 确保有设备连接到同步服务
+# 2. 在设备管理页面查看设备列表
+# 3. 测试设备状态更新和操作
+
+# 测试剪贴板管理功能
+# 1. 确保有剪贴板数据
+# 2. 在剪贴板管理页面查看内容
+# 3. 测试内容筛选和管理功能
+```
+
+#### API测试
+```bash
+# 使用curl测试管理后台API
+# 登录获取token
+curl -X POST http://localhost:8081/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"admin123"}'
+
+# 获取用户列表（需要替换YOUR_TOKEN）
+curl -X GET http://localhost:8081/api/users \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# 获取设备列表
+curl -X GET http://localhost:8081/api/devices \
+  -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
 ### 故障排除
@@ -201,6 +271,22 @@ pnpm build
 NODE_ENV=production pnpm electron
 ```
 
+#### 5. 管理后台相关问题
+```bash
+# 管理后台API服务启动失败
+# 检查端口8081是否被占用
+netstat -ano | Select-String ":8081"
+
+# 管理后台前端连接API失败
+# 确保管理后台API服务在8081端口正常运行
+# 检查apps/admin-web/src中的API配置
+
+# 重新安装管理后台依赖
+cd apps/admin-web
+rm -rf node_modules
+pnpm install
+```
+
 ## 功能特性
 
 ### 核心功能
@@ -209,6 +295,13 @@ NODE_ENV=production pnpm electron
 - ✅ 快速搜索和筛选
 - ✅ 自动粘贴功能
 - ✅ 收藏和备注
+
+### 管理后台功能
+- ✅ 用户管理 - 查看、添加、编辑、删除用户和管理员
+- ✅ 设备管理 - 监控和管理已连接的设备
+- ✅ 剪贴板管理 - 查看和管理所有剪贴板内容
+- ✅ 管理员认证 - 安全的登录和权限控制
+- ✅ 响应式界面 - 支持桌面和移动端访问
 
 ### 高级功能
 - 🚧 OCR 文字识别
