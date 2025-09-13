@@ -98,6 +98,33 @@ func New() (*App, error) {
 	handlers.RegisterRoutes(router)
 	websocketService.RegisterRoutes(router.Group("/ws"))
 
+	// 提供包含数据库与 WebSocket 状态的健康检查
+	router.GET("/health", func(c *gin.Context) {
+		status := map[string]interface{}{
+			"status":    "ok",
+			"timestamp": time.Now().UTC(),
+			"version":   "1.0.0",
+			"services":  make(map[string]interface{}),
+		}
+
+		if database.IsHealthy() {
+			status["services"].(map[string]interface{})["database"] = "ok"
+		} else {
+			status["services"].(map[string]interface{})["database"] = "error"
+			status["status"] = "degraded"
+		}
+
+		if websocketService != nil {
+			status["services"].(map[string]interface{})["websocket"] = "ok"
+			status["websocket_connections"] = websocketService.GetConnectionStats()
+		} else {
+			status["services"].(map[string]interface{})["websocket"] = "error"
+			status["status"] = "degraded"
+		}
+
+		c.JSON(200, status)
+	})
+
 	// 创建 HTTP 服务器
 	server := &http.Server{
 		Addr:         cfg.GetAddr(),

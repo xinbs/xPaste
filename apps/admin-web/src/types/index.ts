@@ -77,3 +77,25 @@ export interface PaginatedResponse<T> {
   limit: number
   totalPages: number
 }
+
+// ============== 新增：系统监控相关类型（sync-api） ==============
+export interface SyncApiHealthServices {
+  database: 'ok' | 'error'
+  websocket: 'ok' | 'error'
+}
+
+export interface SyncApiHealth {
+  status: 'ok' | 'degraded' | 'error'
+  timestamp: string | Date
+  version: string
+  services: SyncApiHealthServices
+  websocket_connections?: WSConnectionStatsMap | any
+}
+
+export type WSConnectionStatsMap = Record<string, number>
+
+export interface WSConnectionStats {
+  total_connections: number
+  connections_by_user: WSConnectionStatsMap
+  timestamp: number
+}

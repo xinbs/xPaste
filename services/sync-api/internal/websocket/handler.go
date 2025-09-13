@@ -136,18 +136,12 @@ func (h *Handler) GetOnlineDevices(c *gin.Context) {
 // @Failure 401 {object} models.Response "未授权"
 // @Router /ws/stats [get]
 func (h *Handler) GetConnectionStats(c *gin.Context) {
-	// 这里应该检查管理员权限，暂时跳过
-	// TODO: 实现管理员权限检查
+    // 这里应该检查管理员权限，暂时跳过
+    // TODO: 实现管理员权限检查
 
-	total, byUser := h.manager.GetClientCount()
+    stats := h.manager.GetStats()
 
-	stats := gin.H{
-		"total_connections": total,
-		"connections_by_user": byUser,
-		"timestamp": time.Now().Unix(),
-	}
-
-	c.JSON(http.StatusOK, models.SuccessResponse("Connection stats retrieved successfully", stats))
+    c.JSON(http.StatusOK, models.SuccessResponse("Connection stats retrieved successfully", stats))
 }
 
 // SendMessage 发送消息到指定设备

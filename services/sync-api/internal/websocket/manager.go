@@ -3,6 +3,7 @@ package websocket
 import (
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -82,100 +83,65 @@ func NewManager() *Manager {
 	}
 }
 
-// Run 启动 WebSocket 管理器
-func (m *Manager) Run() {
-	for {
-		select {
-		case client := <-m.register:
-			m.registerClient(client)
-
-		case client := <-m.unregister:
-			m.unregisterClient(client)
-
-		case message := <-m.broadcast:
-			m.broadcastMessage(message)
-		}
-	}
-}
-
-// registerClient 注册客户端
-func (m *Manager) registerClient(client *Client) {
+// Register 注册客户端
+func (m *Manager) Register(client *Client) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 如果设备已经连接，先断开旧连接
-	if existingClient, exists := m.deviceClients[client.DeviceID]; exists {
-		log.Printf("Device %s already connected, closing existing connection", client.DeviceID)
-		existingClient.Close()
-		m.removeClientFromMaps(existingClient)
-	}
-
-	// 添加到各种映射中
 	m.clients[client.ID] = client
-	m.deviceClients[client.DeviceID] = client
 	m.userClients[client.UserID] = append(m.userClients[client.UserID], client)
-
-	log.Printf("Client registered: %s (User: %d, Device: %s)", client.ID, client.UserID, client.DeviceID)
-
-	// 通知其他设备该设备上线
-	m.notifyDeviceStatus(client.UserID, client.DeviceID, true)
+	m.deviceClients[client.DeviceID] = client
 }
 
-// unregisterClient 注销客户端
-func (m *Manager) unregisterClient(client *Client) {
+// Unregister 注销客户端
+func (m *Manager) Unregister(client *Client) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.removeClientFromMaps(client)
-	client.Close()
+	if _, ok := m.clients[client.ID]; ok {
+		delete(m.clients, client.ID)
+	}
 
-	log.Printf("Client unregistered: %s (User: %d, Device: %s)", client.ID, client.UserID, client.DeviceID)
-
-	// 通知其他设备该设备下线
-	m.notifyDeviceStatus(client.UserID, client.DeviceID, false)
-}
-
-// removeClientFromMaps 从映射中移除客户端
-func (m *Manager) removeClientFromMaps(client *Client) {
-	// 从 clients 中移除
-	delete(m.clients, client.ID)
-
-	// 从 deviceClients 中移除
-	delete(m.deviceClients, client.DeviceID)
-
-	// 从 userClients 中移除
-	if userClients, exists := m.userClients[client.UserID]; exists {
-		for i, c := range userClients {
-			if c.ID == client.ID {
-				m.userClients[client.UserID] = append(userClients[:i], userClients[i+1:]...)
+	if clients, ok := m.userClients[client.UserID]; ok {
+		for i, c := range clients {
+			if c == client {
+				m.userClients[client.UserID] = append(clients[:i], clients[i+1:]...)
 				break
 			}
 		}
-		// 如果用户没有其他连接，删除该用户的映射
 		if len(m.userClients[client.UserID]) == 0 {
 			delete(m.userClients, client.UserID)
 		}
 	}
+
+	if _, ok := m.deviceClients[client.DeviceID]; ok {
+		delete(m.deviceClients, client.DeviceID)
+	}
 }
 
-// broadcastMessage 广播消息
-func (m *Manager) broadcastMessage(message Message) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for _, client := range m.clients {
+// Run 运行管理器
+func (m *Manager) Run() {
+	for {
 		select {
-		case client.Send <- message:
-		default:
-			// 发送失败，关闭客户端
-			go func(c *Client) {
-				m.unregister <- c
-			}(client)
+		case client := <-m.register:
+			m.Register(client)
+		case client := <-m.unregister:
+			m.Unregister(client)
+		case message := <-m.broadcast:
+			m.mu.RLock()
+			for _, client := range m.clients {
+				select {
+				case client.Send <- message:
+				default:
+					go func(c *Client) { m.unregister <- c }(client)
+				}
+			}
+			m.mu.RUnlock()
 		}
 	}
 }
 
-// SendToUser 向指定用户的所有设备发送消息
+// SendToUser 向用户的所有设备发送消息
 func (m *Manager) SendToUser(userID uint, message Message) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -276,15 +242,16 @@ func (m *Manager) IsDeviceOnline(deviceID string) bool {
 }
 
 // GetClientCount 获取连接数统计
-func (m *Manager) GetClientCount() (total int, byUser map[uint]int) {
+func (m *Manager) GetClientCount() (total int, byUser map[string]int) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	total = len(m.clients)
-	byUser = make(map[uint]int)
+	byUser = make(map[string]int)
 
 	for userID, clients := range m.userClients {
-		byUser[userID] = len(clients)
+		key := strconv.FormatUint(uint64(userID), 10)
+		byUser[key] = len(clients)
 	}
 
 	return
@@ -298,10 +265,10 @@ func (m *Manager) GetStats() map[string]interface{} {
 	total, byUser := m.GetClientCount()
 
 	return map[string]interface{}{
-		"total_connections": total,
-		"users_online":      len(byUser),
+		"total_connections":  total,
+		"users_online":       len(byUser),
 		"connections_by_user": byUser,
-		"devices_online":    len(m.deviceClients),
+		"devices_online":     len(m.deviceClients),
 	}
 }
 
