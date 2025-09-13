@@ -95,9 +95,12 @@ export const useAuthStore = create<AuthState>()(
       login: async (username: string, password: string) => {
         set({ isLoading: true, error: null });
         try {
-          // 获取当前设备ID
+          // 获取当前设备ID和IP地址
           const deviceId = getOrCreateDeviceId();
-          const response = await apiClient.login(username, password, deviceId);
+          const { getLocalIPAddress } = await import('@/lib/device');
+          const privateIP = await getLocalIPAddress();
+          
+          const response = await apiClient.login(username, password, deviceId, privateIP);
           if (response.success) {
             set({
               user: response.data.user,
@@ -106,31 +109,61 @@ export const useAuthStore = create<AuthState>()(
               isLoading: false,
             });
             
-            // 登录成功后自动尝试注册设备
+            // 登录成功后获取设备列表并设置当前设备
             try {
-              const { getDeviceName, getDevicePlatform } = await import('../lib/device');
-              const deviceInfo = {
-                device_id: deviceId,
-                name: getDeviceName(),
-                platform: getDevicePlatform(),
-                version: '1.0.0',
-                capabilities: {
-                  clipboard_read: true,
-                  clipboard_write: true,
-                  file_upload: true,
-                  image_ocr: false,
-                  notifications: true,
-                  websocket: true
+              // 先获取设备列表
+              const devicesResponse = await apiClient.getDevices();
+              if (devicesResponse.success) {
+                const devices = devicesResponse.data.items;
+                
+                // 查找当前设备ID对应的设备
+                const currentDeviceFromList = devices.find(device => device.device_id === deviceId);
+                
+                if (currentDeviceFromList) {
+                  // 如果找到当前设备，直接设置为currentDevice
+                  set({ 
+                    devices,
+                    currentDevice: currentDeviceFromList 
+                  });
+                } else {
+                  // 如果没有找到当前设备，自动注册
+                  const { getDeviceName, getDevicePlatform, getLocalIPAddress } = await import('../lib/device');
+                  
+                  // 获取本机IP地址
+                  const localIP = await getLocalIPAddress();
+                  
+                  const deviceInfo = {
+                    device_id: deviceId,
+                    name: getDeviceName(),
+                    platform: getDevicePlatform(),
+                    version: '1.0.0',
+                    capabilities: {
+                      clipboard_read: true,
+                      clipboard_write: true,
+                      file_upload: true,
+                      image_ocr: false,
+                      notifications: true,
+                      websocket: true
+                    },
+                    private_ip: localIP || undefined
+                  };
+                  
+                  const deviceResponse = await apiClient.registerDevice(deviceInfo);
+                  if (deviceResponse.success) {
+                    const newDevice = deviceResponse.data;
+                    set({ 
+                      devices: [...devices, newDevice],
+                      currentDevice: newDevice 
+                    });
+                  } else {
+                    // 注册失败，只设置设备列表
+                    set({ devices });
+                  }
                 }
-              };
-              
-              const deviceResponse = await apiClient.registerDevice(deviceInfo);
-              if (deviceResponse.success) {
-                set({ currentDevice: deviceResponse.data });
               }
             } catch (deviceError) {
-              // 设备注册失败不影响登录，用户可以稍后手动注册
-              console.warn('Auto device registration failed:', deviceError);
+              // 设备相关操作失败不影响登录，用户可以稍后手动处理
+              console.warn('Auto device setup failed:', deviceError);
             }
             
             return true;
@@ -181,11 +214,19 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null });
         try {
           // 获取设备ID并添加到注册信息中
-          const { getOrCreateDeviceId } = await import('../lib/device');
+          const { getOrCreateDeviceId, getLocalIPAddress } = await import('../lib/device');
           const deviceId = getOrCreateDeviceId();
+          
+          // 获取本机IP地址（如果设备信息中没有提供）
+          let localIP = deviceInfo.private_ip;
+          if (!localIP) {
+            localIP = await getLocalIPAddress();
+          }
+          
           const deviceInfoWithId = {
             ...deviceInfo,
-            device_id: deviceId
+            device_id: deviceId,
+            private_ip: localIP || undefined
           };
           
           const response = await apiClient.registerDevice(deviceInfoWithId);

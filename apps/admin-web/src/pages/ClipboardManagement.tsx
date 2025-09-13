@@ -1,11 +1,12 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../utils/api'
+import { useAuth } from '../contexts/AuthContext'
 
 interface ClipboardItem {
   id: string
   content: string
-  contentType: 'text' | 'image' | 'file'
+  type: 'text' | 'image' | 'file'
   userId: string
   username: string
   deviceId: string
@@ -17,23 +18,70 @@ interface ClipboardItem {
   tags: string[]
 }
 
+interface ClipboardResponse {
+  data: ClipboardItem[]
+  pagination: {
+    page: number
+    limit: number
+    total: number
+  }
+}
+
 const ClipboardManagement: React.FC = () => {
+  const { isAuthenticated } = useAuth()
   const [selectedItems, setSelectedItems] = useState<string[]>([])
   const [filterType, setFilterType] = useState<'all' | 'text' | 'image' | 'file'>('all')
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'deleted'>('all')
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedItem, setSelectedItem] = useState<ClipboardItem | null>(null)
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  // 新增：删除确认模态框状态
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false)
+  const [selectedDeleteId, setSelectedDeleteId] = useState<string | null>(null)
+  const [deleteActionType, setDeleteActionType] = useState<'single' | 'batch' | 'clear' | null>(null)
 
   const queryClient = useQueryClient()
 
-  const { data: clipboardItems, isLoading } = useQuery<ClipboardItem[]>({
-    queryKey: ['clipboard-items'],
+  const { data: clipboardData, isLoading, error } = useQuery<ClipboardResponse>({
+    queryKey: ['clipboard-items', currentPage, pageSize, filterType],
     queryFn: async () => {
-      const response = await api.get('/api/v1/clipboard/')
-      return response.data.data
-    }
+      const params = new URLSearchParams({
+        page: currentPage.toString(),
+        limit: pageSize.toString()
+      })
+      if (filterType !== 'all') {
+        params.append('type', filterType)
+      }
+      const response = await api.get(`/api/v1/clipboard/?${params}`)
+      return response.data
+    },
+    enabled: isAuthenticated
   })
+
+  // 新增：按类型的全量计数，仅获取 total（使用 limit=1 减少开销）
+  const { data: textCountData } = useQuery<ClipboardResponse>({
+    queryKey: ['clipboard-count', 'text'],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: '1', limit: '1', type: 'text' })
+      const response = await api.get(`/api/v1/clipboard/?${params}`)
+      return response.data
+    },
+    enabled: isAuthenticated
+  })
+  const { data: imageCountData } = useQuery<ClipboardResponse>({
+    queryKey: ['clipboard-count', 'image'],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: '1', limit: '1', type: 'image' })
+      const response = await api.get(`/api/v1/clipboard/?${params}`)
+      return response.data
+    },
+    enabled: isAuthenticated
+  })
+  const clipboardItems = clipboardData?.data || []
+  const totalItems = clipboardData?.pagination?.total || 0
+  const totalPages = Math.ceil(totalItems / pageSize)
 
   const deleteItemMutation = useMutation({
     mutationFn: async (itemId: string) => {
@@ -41,15 +89,16 @@ const ClipboardManagement: React.FC = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['clipboard-items'] })
+      setSelectedItems([])
     }
   })
 
   const batchDeleteMutation = useMutation({
     mutationFn: async (itemIds: string[]) => {
-      await api.post('/api/v1/clipboard/batch-delete', { itemIds })
+      await api.post('/api/v1/clipboard/batch-delete', { clipboardIds: itemIds })
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['clipboard-items'] })
+      queryClient.invalidateQueries({ queryKey: ['clipboard-items', currentPage, pageSize, filterType] })
       setSelectedItems([])
     }
   })
@@ -69,13 +118,15 @@ const ClipboardManagement: React.FC = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['clipboard-items'] })
+      setSelectedItems([])
     }
   })
 
   const handleDeleteItem = (itemId: string) => {
-    if (window.confirm('确定要删除此剪贴板项目吗？')) {
-      deleteItemMutation.mutate(itemId)
-    }
+    // 使用自定义模态框进行确认，避免部分环境下 window.confirm 行为异常
+    setSelectedDeleteId(itemId)
+    setDeleteActionType('single')
+    setIsDeleteConfirmOpen(true)
   }
 
   const handleRestoreItem = (itemId: string) => {
@@ -84,15 +135,13 @@ const ClipboardManagement: React.FC = () => {
 
   const handleBatchDelete = () => {
     if (selectedItems.length === 0) return
-    if (window.confirm(`确定要删除选中的 ${selectedItems.length} 个项目吗？`)) {
-      batchDeleteMutation.mutate(selectedItems)
-    }
+    setDeleteActionType('batch')
+    setIsDeleteConfirmOpen(true)
   }
 
   const handleClearAll = () => {
-    if (window.confirm('确定要清空所有剪贴板数据吗？此操作不可恢复。')) {
-      clearAllMutation.mutate()
-    }
+    setDeleteActionType('clear')
+    setIsDeleteConfirmOpen(true)
   }
 
   const handleSelectItem = (itemId: string) => {
@@ -117,7 +166,7 @@ const ClipboardManagement: React.FC = () => {
   }
 
   const filteredItems = clipboardItems?.filter(item => {
-    const matchesType = filterType === 'all' || item.contentType === filterType
+    const matchesType = filterType === 'all' || (item.type || 'unknown') === filterType
     const matchesStatus = filterStatus === 'all' || 
       (filterStatus === 'active' && !item.isDeleted) ||
       (filterStatus === 'deleted' && item.isDeleted)
@@ -186,7 +235,7 @@ const ClipboardManagement: React.FC = () => {
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-500">总项目数</p>
-              <p className="text-2xl font-semibold text-gray-900">{clipboardItems?.length || 0}</p>
+              <p className="text-2xl font-semibold text-gray-900">{totalItems}</p>
             </div>
           </div>
         </div>
@@ -201,7 +250,7 @@ const ClipboardManagement: React.FC = () => {
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-500">文本项目</p>
               <p className="text-2xl font-semibold text-gray-900">
-                {clipboardItems?.filter(item => item.contentType === 'text').length || 0}
+                {textCountData?.pagination?.total ?? 0}
               </p>
             </div>
           </div>
@@ -217,7 +266,7 @@ const ClipboardManagement: React.FC = () => {
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-500">图片项目</p>
               <p className="text-2xl font-semibold text-gray-900">
-                {clipboardItems?.filter(item => item.contentType === 'image').length || 0}
+                {imageCountData?.pagination?.total ?? 0}
               </p>
             </div>
           </div>
@@ -278,6 +327,21 @@ const ClipboardManagement: React.FC = () => {
                 <option value="all">全部状态</option>
                 <option value="active">正常</option>
                 <option value="deleted">已删除</option>
+              </select>
+              
+              {/* 每页显示数量 */}
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value))
+                  setCurrentPage(1)
+                }}
+                className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value={10}>10条/页</option>
+                <option value={20}>20条/页</option>
+                <option value={50}>50条/页</option>
+                <option value={100}>100条/页</option>
               </select>
               
               {/* 批量操作 */}
@@ -355,7 +419,7 @@ const ClipboardManagement: React.FC = () => {
                   <td className="px-6 py-4">
                     <div className="max-w-xs">
                       <div className="text-sm font-medium text-gray-900 truncate">
-                        {item.contentType === 'text' ? truncateContent(item.content) : `[${item.contentType.toUpperCase()}]`}
+                        {item.type === 'text' ? truncateContent(item.content) : `[${item.type?.toUpperCase() || 'UNKNOWN'}]`}
                       </div>
                       <button
                         onClick={() => handleViewDetail(item)}
@@ -367,11 +431,11 @@ const ClipboardManagement: React.FC = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
-                      <span className="mr-2">{getTypeIcon(item.contentType)}</span>
+                      <span className="mr-2">{getTypeIcon(item.type || 'unknown')}</span>
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        getTypeColor(item.contentType)
+                        getTypeColor(item.type || 'unknown')
                       }`}>
-                        {item.contentType}
+                        {item.type || 'unknown'}
                       </span>
                     </div>
                   </td>
@@ -405,6 +469,7 @@ const ClipboardManagement: React.FC = () => {
                         </button>
                       ) : (
                         <button
+                          type="button"
                           onClick={() => handleDeleteItem(item.id)}
                           className="text-red-600 hover:text-red-900 transition-colors"
                         >
@@ -417,13 +482,96 @@ const ClipboardManagement: React.FC = () => {
               )) || (
                 <tr>
                   <td colSpan={9} className="px-6 py-4 text-center text-gray-500">
-                    {searchTerm || filterType !== 'all' || filterStatus !== 'all' ? '没有找到匹配的项目' : '暂无剪贴板数据'}
+                    {isLoading ? (
+                      <div className="flex items-center justify-center py-8">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                        <span className="ml-2">加载中...</span>
+                      </div>
+                    ) : error ? (
+                      <div className="text-red-500">
+                        加载失败，请检查网络连接或重新登录
+                      </div>
+                    ) : searchTerm || filterType !== 'all' || filterStatus !== 'all' ? '没有找到匹配的项目' : '暂无剪贴板数据'}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+
+        {/* 分页控件 */}
+        {totalPages > 1 && (
+          <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
+            <div className="flex-1 flex justify-between sm:hidden">
+              <button
+                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                disabled={currentPage === 1}
+                className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                上一页
+              </button>
+              <button
+                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                disabled={currentPage === totalPages}
+                className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                下一页
+              </button>
+            </div>
+            <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm text-gray-700">
+                  显示第 <span className="font-medium">{(currentPage - 1) * pageSize + 1}</span> 到{' '}
+                  <span className="font-medium">{Math.min(currentPage * pageSize, totalItems)}</span> 条，
+                  共 <span className="font-medium">{totalItems}</span> 条记录
+                </p>
+              </div>
+              <div>
+                <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                  <button
+                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                    disabled={currentPage === 1}
+                    className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    上一页
+                  </button>
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNum
+                    if (totalPages <= 5) {
+                      pageNum = i + 1
+                    } else if (currentPage <= 3) {
+                      pageNum = i + 1
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNum = totalPages - 4 + i
+                    } else {
+                      pageNum = currentPage - 2 + i
+                    }
+                    return (
+                      <button
+                        key={pageNum}
+                        onClick={() => setCurrentPage(pageNum)}
+                        className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
+                          currentPage === pageNum
+                            ? 'z-10 bg-indigo-50 border-indigo-500 text-indigo-600'
+                            : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
+                        }`}
+                      >
+                        {pageNum}
+                      </button>
+                    )
+                  })}
+                  <button
+                    onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                    disabled={currentPage === totalPages}
+                    className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    下一页
+                  </button>
+                </nav>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 详情模态框 */}
@@ -439,17 +587,16 @@ const ClipboardManagement: React.FC = () => {
                 ✕
               </button>
             </div>
-            
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">类型</label>
                   <div className="flex items-center">
-                    <span className="mr-2">{getTypeIcon(selectedItem.contentType)}</span>
+                    <span className="mr-2">{getTypeIcon(selectedItem.type || 'unknown')}</span>
                     <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                      getTypeColor(selectedItem.contentType)
+                      getTypeColor(selectedItem.type || 'unknown')
                     }`}>
-                      {selectedItem.contentType}
+                      {selectedItem.type || 'unknown'}
                     </span>
                   </div>
                 </div>
@@ -478,9 +625,9 @@ const ClipboardManagement: React.FC = () => {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">内容</label>
                 <div className="border border-gray-300 rounded-md p-3 bg-gray-50 max-h-64 overflow-y-auto">
-                  {selectedItem.contentType === 'text' ? (
+                  {selectedItem.type === 'text' ? (
                     <pre className="text-sm text-gray-900 whitespace-pre-wrap">{selectedItem.content}</pre>
-                  ) : selectedItem.contentType === 'image' ? (
+                  ) : selectedItem.type === 'image' ? (
                     <div className="text-center">
                       <img 
                         src={selectedItem.content} 
@@ -495,7 +642,7 @@ const ClipboardManagement: React.FC = () => {
                     </div>
                   ) : (
                     <div className="text-center text-gray-500">
-                      <p>文件类型: {selectedItem.contentType}</p>
+                      <p>文件类型: {selectedItem.type || 'unknown'}</p>
                       <p className="text-xs mt-1">无法预览此类型的内容</p>
                     </div>
                   )}
@@ -522,6 +669,64 @@ const ClipboardManagement: React.FC = () => {
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
               >
                 关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* 删除确认模态框（根层） */}
+      {isDeleteConfirmOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-sm">
+            <h3 className="text-lg font-medium text-gray-900 mb-2">确认删除</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              {deleteActionType === 'batch'
+                ? `确定要删除选中的 ${selectedItems.length} 个项目吗？`
+                : deleteActionType === 'clear'
+                ? '确定要清空所有剪贴板项目吗？此操作将删除所有项目。'
+                : '确定要删除此剪贴板项目吗？'}
+            </p>
+            <div className="flex justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDeleteConfirmOpen(false)
+                  setSelectedDeleteId(null)
+                  setDeleteActionType(null)
+                }}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (deleteActionType === 'single') {
+                    if (!selectedDeleteId) return
+                    deleteItemMutation.mutate(selectedDeleteId)
+                  } else if (deleteActionType === 'batch') {
+                    if (selectedItems.length === 0) return
+                    batchDeleteMutation.mutate(selectedItems)
+                  } else if (deleteActionType === 'clear') {
+                    clearAllMutation.mutate()
+                  }
+                  setIsDeleteConfirmOpen(false)
+                  setSelectedDeleteId(null)
+                  setDeleteActionType(null)
+                }}
+                disabled={
+                  deleteActionType === 'single'
+                    ? deleteItemMutation.isPending
+                    : deleteActionType === 'batch'
+                    ? batchDeleteMutation.isPending
+                    : deleteActionType === 'clear'
+                    ? clearAllMutation.isPending
+                    : false
+                }
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded-md transition-colors"
+              >
+                确认删除
               </button>
             </div>
           </div>

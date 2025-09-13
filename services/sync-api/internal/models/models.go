@@ -19,9 +19,11 @@ type AuthResult struct {
 
 // LoginRequest 登录请求
 type LoginRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
-	DeviceID string `json:"device_id,omitempty"`
+	Username  string `json:"username" binding:"required"`
+	Password  string `json:"password" binding:"required"`
+	DeviceID  string `json:"device_id,omitempty"`
+	ClientIP  string `json:"client_ip,omitempty"`     // 客户端传递的IP地址
+	PrivateIP string `json:"private_ip,omitempty"`    // 客户端传递的内网IP地址
 }
 
 // 注册请求

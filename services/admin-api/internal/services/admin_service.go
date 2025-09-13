@@ -21,7 +21,7 @@ func NewAdminService() *AdminService {
 }
 
 // Login 管理员登录
-func (s *AdminService) Login(req *models.AdminLoginRequest) (map[string]interface{}, error) {
+func (s *AdminService) Login(req *models.AdminLoginRequest, clientIP string) (map[string]interface{}, error) {
 	// 根据用户名或邮箱查找管理员
 	var admin *models.Admin
 	var err error
@@ -39,6 +39,17 @@ func (s *AdminService) Login(req *models.AdminLoginRequest) (map[string]interfac
 	// 验证密码
 	if !utils.CheckPasswordHash(req.Password, admin.Password) {
 		return nil, errors.New("用户名或密码错误")
+	}
+	
+	// 更新登录信息
+	now := time.Now()
+	admin.LastLoginAt = &now
+	admin.LastLoginIP = clientIP
+	admin.LoginCount++
+	
+	// 保存到数据库
+	if err := s.db.Save(admin).Error; err != nil {
+		return nil, errors.New("更新登录信息失败")
 	}
 	
 	// 生成JWT令牌
@@ -114,6 +125,15 @@ func (s *AdminService) UpdateAdmin(id uint, req *models.AdminUpdateRequest) (*mo
 	}
 
 	// 更新字段
+	if req.Username != "" {
+		// 检查用户名是否已被其他用户使用
+		existingAdmin, err := database.GetAdminByUsername(req.Username)
+		if err == nil && existingAdmin.ID != id {
+			return nil, errors.New("用户名已被使用")
+		}
+		admin.Username = req.Username
+	}
+
 	if req.Email != "" {
 		// 检查邮箱是否已被其他用户使用
 		existingAdmin, err := database.GetAdminByEmail(req.Email)
@@ -121,6 +141,19 @@ func (s *AdminService) UpdateAdmin(id uint, req *models.AdminUpdateRequest) (*mo
 			return nil, errors.New("邮箱已被使用")
 		}
 		admin.Email = req.Email
+	}
+
+	if req.Password != "" {
+		// 加密新密码
+		hashedPassword, err := utils.HashPassword(req.Password)
+		if err != nil {
+			return nil, err
+		}
+		admin.Password = hashedPassword
+	}
+
+	if req.Nickname != "" {
+		admin.Nickname = req.Nickname
 	}
 
 	if req.Role != "" {

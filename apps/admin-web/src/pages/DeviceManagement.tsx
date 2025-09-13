@@ -14,7 +14,10 @@ interface Device {
   isOnline: boolean
   lastActiveAt: string
   createdAt: string
-  ipAddress: string
+  ipAddress: string    // 原始IP地址（兼容性保留）
+  publicIP: string     // 公网IP地址
+  privateIP: string    // 内网IP地址
+  ipType: string       // IP类型：public/private
   userAgent: string
 }
 
@@ -25,7 +28,7 @@ const DeviceManagement: React.FC = () => {
 
   const queryClient = useQueryClient()
 
-  const { data: devices, isLoading } = useQuery<Device[]>({
+  const { data: devices, isLoading, error } = useQuery<Device[]>({
     queryKey: ['devices'],
     queryFn: async () => {
       const response = await api.get('/api/v1/devices/')
@@ -104,7 +107,7 @@ const DeviceManagement: React.FC = () => {
     const matchesSearch = searchTerm === '' ||
       device.deviceName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       device.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      device.platform.toLowerCase().includes(searchTerm.toLowerCase())
+      (device.platform && device.platform.toLowerCase().includes(searchTerm.toLowerCase()))
     
     return matchesStatus && matchesSearch
   })
@@ -114,6 +117,7 @@ const DeviceManagement: React.FC = () => {
   }
 
   const getPlatformIcon = (platform: string) => {
+    if (!platform) return '💻'
     switch (platform.toLowerCase()) {
       case 'windows': return '🖥️'
       case 'macos': return '🍎'
@@ -321,7 +325,35 @@ const DeviceManagement: React.FC = () => {
                     {new Date(device.lastActiveAt).toLocaleString()}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {device.ipAddress}
+                    <div className="space-y-1">
+                      {device.publicIP && (
+                        <div className="flex items-center space-x-2">
+                          <span className="inline-flex px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded">
+                            公网
+                          </span>
+                          <span>{device.publicIP}</span>
+                        </div>
+                      )}
+                      {device.privateIP && (
+                        <div className="flex items-center space-x-2">
+                          <span className="inline-flex px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded">
+                            内网
+                          </span>
+                          <span>{device.privateIP}</span>
+                        </div>
+                      )}
+                      {!device.publicIP && !device.privateIP && device.ipAddress && (
+                        <div className="flex items-center space-x-2">
+                          <span className="inline-flex px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded">
+                            未知
+                          </span>
+                          <span>{device.ipAddress}</span>
+                        </div>
+                      )}
+                      {!device.publicIP && !device.privateIP && !device.ipAddress && (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <div className="flex space-x-2">
@@ -345,7 +377,16 @@ const DeviceManagement: React.FC = () => {
               )) || (
                 <tr>
                   <td colSpan={8} className="px-6 py-4 text-center text-gray-500">
-                    {searchTerm || filterStatus !== 'all' ? '没有找到匹配的设备' : '暂无设备数据'}
+                    {isLoading ? (
+                      <div className="flex items-center justify-center py-8">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                        <span className="ml-2">加载中...</span>
+                      </div>
+                    ) : error ? (
+                      <div className="text-red-500">
+                        加载失败，请检查网络连接或重新登录
+                      </div>
+                    ) : searchTerm || filterStatus !== 'all' ? '没有找到匹配的设备' : '暂无设备数据'}
                   </td>
                 </tr>
               )}

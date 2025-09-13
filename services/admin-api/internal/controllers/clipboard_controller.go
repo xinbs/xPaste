@@ -3,10 +3,51 @@ package controllers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"admin-api/internal/services"
+	"admin-api/shared/models"
 	"github.com/gin-gonic/gin"
 )
+
+// ClipboardResponse 剪贴板响应结构体
+type ClipboardResponse struct {
+	ID         string    `json:"id"`
+	Content    string    `json:"content"`
+	Type       string    `json:"type"`
+	UserID     string    `json:"userId"`
+	Username   string    `json:"username"`
+	DeviceID   string    `json:"deviceId"`
+	DeviceName string    `json:"deviceName"`
+	Size       int       `json:"size"`
+	CreatedAt  string    `json:"createdAt"`
+	SyncedAt   string    `json:"syncedAt"`
+	IsDeleted  bool      `json:"isDeleted"`
+	Tags       []string  `json:"tags"`
+}
+
+// convertToResponse 转换为响应格式
+func convertToResponse(clipboard models.Clipboard) ClipboardResponse {
+	username := "Unknown"
+	if clipboard.User != nil {
+		username = clipboard.User.Username
+	}
+
+	return ClipboardResponse{
+		ID:         strconv.Itoa(int(clipboard.ID)),
+		Content:    clipboard.Content,
+		Type:       clipboard.Type,
+		UserID:     strconv.Itoa(int(clipboard.UserID)),
+		Username:   username,
+		DeviceID:   clipboard.DeviceID,
+		DeviceName: clipboard.DeviceID, // 暂时使用DeviceID作为DeviceName
+		Size:       len(clipboard.Content),
+		CreatedAt:  clipboard.CreatedAt.Format(time.RFC3339),
+		SyncedAt:   clipboard.UpdatedAt.Format(time.RFC3339),
+		IsDeleted:  clipboard.Status == "deleted",
+		Tags:       []string{}, // 暂时返回空数组
+	}
+}
 
 type ClipboardController struct {
 	clipboardService *services.ClipboardService
@@ -34,9 +75,15 @@ func (ctrl *ClipboardController) GetAllClipboards(c *gin.Context) {
 		return
 	}
 
+	// 转换为响应格式
+	responseData := make([]ClipboardResponse, len(clipboards))
+	for i, clipboard := range clipboards {
+		responseData[i] = convertToResponse(clipboard)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "获取成功",
-		"data": clipboards,
+		"data": responseData,
 		"pagination": gin.H{
 			"page":  page,
 			"limit": limit,
@@ -118,6 +165,46 @@ func (ctrl *ClipboardController) BatchDeleteClipboards(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "批量删除成功",
+	})
+}
+
+// RestoreClipboard 恢复剪贴板内容
+func (ctrl *ClipboardController) RestoreClipboard(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "无效的剪贴板ID",
+		})
+		return
+	}
+
+	err = ctrl.clipboardService.RestoreClipboard(uint(id))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "恢复成功",
+	})
+}
+
+// ClearAllClipboards 清空所有剪贴板内容
+func (ctrl *ClipboardController) ClearAllClipboards(c *gin.Context) {
+	err := ctrl.clipboardService.ClearAllClipboards()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "清空失败",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "清空成功",
 	})
 }
 

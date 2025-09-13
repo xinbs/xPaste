@@ -41,6 +41,26 @@ xPaste 项目结构
 - **构建**：独立的构建流程
 - **部署**：可单独部署或集成部署
 
+### 端口与环境变量配置（开发与部署）
+
+- Admin API 端口
+  - 默认端口：8081（参考 services/admin-api/.env.example 中的 PORT）
+  - 可通过环境变量或 .env 文件覆盖：services/admin-api/.env 中设置 PORT=8083（方案B）
+  - 运行时临时覆盖示例（PowerShell）：$env:PORT="8083"; go run .
+
+- Admin Web 后端地址
+  - 通过 Vite 环境变量 VITE_ADMIN_API_BASE_URL 指定后端 API 基础地址
+  - 本地推荐在 apps/admin-web/.env.local 中配置，例如：VITE_ADMIN_API_BASE_URL=http://localhost:8083
+  - .env.local 已被 .gitignore 忽略，不会提交到仓库
+
+- 方案B（开发环境保留 8083）操作步骤
+  1) 在 services/admin-api/.env 设置 PORT=8083 并重启 Admin API；或在启动命令前设置环境变量 PORT=8083
+  2) 在 apps/admin-web/.env.local 写入 VITE_ADMIN_API_BASE_URL=http://localhost:8083 并重启前端 dev server（或浏览器强刷后确认请求指向 8083）
+
+- 生产环境说明
+  - 现有 Nginx/反向代理配置仍以 8081 为默认目标；若变更生产端口，请同步调整代理与部署脚本
+
+
 ### 数据访问层设计
 
 ```go

@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"xpaste-sync/internal/models"
+	"xpaste-sync/internal/utils"
 )
 
 // DeviceService 设备服务
@@ -22,7 +23,7 @@ func NewDeviceService(db *gorm.DB) *DeviceService {
 }
 
 // RegisterDevice 注册设备
-func (s *DeviceService) RegisterDevice(userID uint, req *models.RegisterDeviceRequest, clientIP string) (*models.Device, error) {
+func (s *DeviceService) RegisterDevice(userID uint, req *models.RegisterDeviceRequest, ipInfo *utils.IPInfo) (*models.Device, error) {
 	// 优先使用前端传递的设备ID，如果没有则生成一个
 	var deviceID string
 	if req.DeviceID != "" {
@@ -30,6 +31,9 @@ func (s *DeviceService) RegisterDevice(userID uint, req *models.RegisterDeviceRe
 	} else {
 		deviceID = generateDeviceID(userID, req.Name)
 	}
+
+	// 优先使用客户端传递的IP地址信息
+	enhancedIPInfo := enhanceIPInfo(ipInfo, req)
 
 	// 检查设备是否已存在
 	var existingDevice models.Device
@@ -42,7 +46,9 @@ func (s *DeviceService) RegisterDevice(userID uint, req *models.RegisterDeviceRe
 		existingDevice.OSVersion = req.OSVersion
 		now := time.Now()
 		existingDevice.LastSeen = &now
-		existingDevice.LastIP = clientIP
+		existingDevice.LastIP = enhancedIPInfo.GetBestIP()  // 保留兼容性
+		existingDevice.PublicIP = enhancedIPInfo.PublicIP
+		existingDevice.PrivateIP = enhancedIPInfo.PrivateIP
 		existingDevice.IsOnline = true
 		existingDevice.Status = models.DeviceStatusActive
 		existingDevice.Capabilities = req.Capabilities
@@ -56,6 +62,7 @@ func (s *DeviceService) RegisterDevice(userID uint, req *models.RegisterDeviceRe
 
 	// 创建新设备
 	now := time.Now()
+	
 	device := models.Device{
 		UserID:       userID,
 		DeviceID:     deviceID,
@@ -65,7 +72,9 @@ func (s *DeviceService) RegisterDevice(userID uint, req *models.RegisterDeviceRe
 		Model:        req.Model,
 		OSVersion:    req.OSVersion,
 		LastSeen:     &now,
-		LastIP:       clientIP,
+		LastIP:       enhancedIPInfo.GetBestIP(),  // 保留兼容性
+		PublicIP:     enhancedIPInfo.PublicIP,
+		PrivateIP:    enhancedIPInfo.PrivateIP,
 		IsOnline:     true,
 		Status:       models.DeviceStatusActive,
 		Capabilities: req.Capabilities,
@@ -345,4 +354,87 @@ func generateDeviceID(userID uint, deviceName string) string {
 	// 使用用户ID和设备名称的哈希值生成固定的设备ID
 	hash := fmt.Sprintf("%d-%s", userID, deviceName)
 	return fmt.Sprintf("%x", md5.Sum([]byte(hash)))
+}
+
+// UpdateDeviceIP 更新设备IP信息
+func (s *DeviceService) UpdateDeviceIP(userID uint, deviceID string, ipInfo *utils.IPInfo, clientIP, privateIP string) error {
+	if deviceID == "" {
+		return nil // 如果没有设备ID，跳过更新
+	}
+
+	// 增强IP信息
+	enhanced := &utils.IPInfo{
+		ClientIP:  ipInfo.ClientIP,
+		RealIP:    ipInfo.RealIP,
+		PublicIP:  ipInfo.PublicIP,
+		PrivateIP: ipInfo.PrivateIP,
+		IsPrivate: ipInfo.IsPrivate,
+	}
+
+	// 如果客户端传递了内网IP，优先使用
+	if privateIP != "" {
+		enhanced.PrivateIP = privateIP
+		enhanced.IsPrivate = true
+	}
+
+	// 如果客户端传递了IP地址，作为RealIP使用
+	if clientIP != "" {
+		enhanced.RealIP = clientIP
+		// 重新分类IP
+		enhanced.ClassifyIP()
+	}
+
+	// 查找设备并更新IP信息
+	var device models.Device
+	if err := s.db.Where("user_id = ? AND device_id = ?", userID, deviceID).First(&device).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil // 设备不存在，跳过更新
+		}
+		return fmt.Errorf("failed to find device: %w", err)
+	}
+
+	// 更新设备IP信息和最后活跃时间
+	now := time.Now()
+	device.LastSeen = &now
+	device.LastIP = enhanced.GetBestIP()
+	device.PublicIP = enhanced.PublicIP
+	device.PrivateIP = enhanced.PrivateIP
+	device.IsOnline = true
+
+	if err := s.db.Save(&device).Error; err != nil {
+		return fmt.Errorf("failed to update device IP: %w", err)
+	}
+
+	return nil
+}
+
+// enhanceIPInfo 增强IP信息，优先使用客户端传递的IP地址
+func enhanceIPInfo(baseInfo *utils.IPInfo, req *models.RegisterDeviceRequest) *utils.IPInfo {
+	enhanced := &utils.IPInfo{
+		ClientIP:  baseInfo.ClientIP,
+		RealIP:    baseInfo.RealIP,
+		PublicIP:  baseInfo.PublicIP,
+		PrivateIP: baseInfo.PrivateIP,
+		IsPrivate: baseInfo.IsPrivate,
+	}
+
+	// 如果客户端传递了内网IP，优先使用
+	if req.PrivateIP != "" {
+		enhanced.PrivateIP = req.PrivateIP
+		enhanced.IsPrivate = true
+	}
+
+	// 如果客户端传递了IP地址，作为RealIP使用
+	if req.ClientIP != "" {
+		enhanced.RealIP = req.ClientIP
+		// 重新分类IP
+		enhanced.ClassifyIP()
+	}
+
+	// 如果没有获取到公网IP，尝试主动获取
+	if enhanced.PublicIP == "" {
+		enhanced = utils.GetEnhancedIPInfo(enhanced)
+	}
+
+	return enhanced
 }

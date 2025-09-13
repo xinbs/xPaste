@@ -26,10 +26,11 @@ const UserManagement: React.FC = () => {
     isActive: true,
     userType: 'user' as 'user' | 'admin'
   })
+  const [editError, setEditError] = useState<string | null>(null)
 
   const queryClient = useQueryClient()
 
-  const { data: users, isLoading } = useQuery<User[]>({
+  const { data: users, isLoading, error } = useQuery<User[]>({
     queryKey: ['all-users'],
     queryFn: async () => {
       // 同时获取普通用户和管理员用户
@@ -84,14 +85,32 @@ const UserManagement: React.FC = () => {
 
   const updateUserMutation = useMutation({
     mutationFn: async ({ id, userData, userType }: { id: string, userData: any, userType: 'user' | 'admin' }) => {
+      // 将表单数据映射为后端需要的字段
+      const payload: any = {}
+      if (userData.username) payload.username = userData.username
+      if (userData.email) payload.email = userData.email
+      if (userData.password) payload.password = userData.password
+      // 统一用 status 表示启用/禁用
+      payload.status = userData.isActive ? 'active' : 'inactive'
+      // 仅管理员可以修改角色，且仅允许 admin/super_admin
+      if (userType === 'admin') {
+        const role = userData.role === 'super_admin' ? 'super_admin' : 'admin'
+        payload.role = role
+      }
       const endpoint = userType === 'admin' ? `/api/v1/admins/${id}` : `/api/v1/users/${id}`
-      const response = await api.put(endpoint, userData)
+      const response = await api.put(endpoint, payload)
       return response.data
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['all-users'] })
       setIsEditModalOpen(false)
+      setEditError(null)
       resetForm()
+    },
+    onError: (err: any) => {
+      // 提示后端返回的错误信息
+      const msg = err?.response?.data?.error || err?.message || '更新失败，请稍后重试'
+      setEditError(msg)
     }
   })
 
@@ -132,6 +151,7 @@ const UserManagement: React.FC = () => {
       isActive: user.isActive,
       userType: user.userType
     })
+    setEditError(null)
     setIsEditModalOpen(true)
   }
 
@@ -256,7 +276,16 @@ const UserManagement: React.FC = () => {
               )) || (
                 <tr>
                   <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
-                    暂无用户数据
+                    {isLoading ? (
+                      <div className="flex items-center justify-center py-8">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                        <span className="ml-2">加载中...</span>
+                      </div>
+                    ) : error ? (
+                      <div className="text-red-500">
+                        加载失败，请检查网络连接或重新登录
+                      </div>
+                    ) : '暂无用户数据'}
                   </td>
                 </tr>
               )}
@@ -430,29 +459,31 @@ const UserManagement: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    新密码（留空则不修改）
+                    新密码（可选）
                   </label>
                   <input
                     type="password"
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="留空则不修改密码"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    角色
-                  </label>
-                  <select
-                    value={formData.role}
-                    onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="user">普通用户</option>
-                    <option value="admin">管理员</option>
-                  </select>
-                </div>
+                {selectedUser?.userType === 'admin' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      角色
+                    </label>
+                    <select
+                      value={formData.role}
+                      onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="admin">管理员</option>
+                      <option value="super_admin">超级管理员</option>
+                    </select>
+                  </div>
+                )}
                 <div className="flex items-center">
                   <input
                     type="checkbox"
@@ -465,6 +496,11 @@ const UserManagement: React.FC = () => {
                     启用用户
                   </label>
                 </div>
+                {editError && (
+                  <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+                    {editError}
+                  </div>
+                )}
               </div>
               <div className="flex justify-end space-x-3 mt-6">
                 <button

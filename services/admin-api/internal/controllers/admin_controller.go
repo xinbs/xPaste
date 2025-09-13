@@ -6,6 +6,7 @@ import (
 
 	"admin-api/internal/services"
 	"admin-api/shared/models"
+	"admin-api/shared/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -30,7 +31,11 @@ func (ctrl *AdminController) Login(c *gin.Context) {
 		return
 	}
 
-	resp, err := ctrl.adminService.Login(&req)
+	// 获取客户端IP信息
+	ipInfo := utils.GetClientIPInfo(c)
+	clientIP := ipInfo.GetBestIP()
+
+	resp, err := ctrl.adminService.Login(&req, clientIP)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": err.Error(),

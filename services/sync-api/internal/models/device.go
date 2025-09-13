@@ -31,9 +31,11 @@ type Device struct {
 	// 状态信息
 	Status       DeviceStatus `json:"status" gorm:"default:1"`
 	LastSeen     *time.Time   `json:"last_seen"`
-	LastIP       string       `json:"last_ip" gorm:"size:45"`
+	LastIP       string       `json:"last_ip" gorm:"size:45"`        // 保留原字段用于兼容性
+	PublicIP     string       `json:"public_ip" gorm:"size:45"`      // 公网IP
+	PrivateIP    string       `json:"private_ip" gorm:"size:45"`     // 内网IP
 	IsOnline     bool         `json:"is_online" gorm:"default:false"`
-	LastSyncAt   *time.Time   `json:"last_sync_at"`
+	LastSyncAt   *time.Time   `json:"last_sync_at"` 
 
 	// 设备特性
 	Capabilities DeviceCapabilities `json:"capabilities" gorm:"type:text"`
@@ -161,6 +163,8 @@ type RegisterDeviceRequest struct {
 	Model        string              `json:"model" binding:"max=100"`
 	OSVersion    string              `json:"os_version" binding:"max=50"`
 	Capabilities DeviceCapabilities `json:"capabilities"`
+	ClientIP     string              `json:"client_ip,omitempty"`     // 客户端传递的IP地址
+	PrivateIP    string              `json:"private_ip,omitempty"`    // 客户端传递的内网IP地址
 }
 
 // UpdateDeviceRequest 更新设备请求

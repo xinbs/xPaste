@@ -144,10 +144,13 @@ class ApiClient {
   }
 
   // 认证相关API
-  async login(username: string, password: string, deviceId?: string) {
+  async login(username: string, password: string, deviceId?: string, privateIP?: string | null) {
     const requestBody: any = { username, password };
     if (deviceId) {
       requestBody.device_id = deviceId;
+    }
+    if (privateIP) {
+      requestBody.private_ip = privateIP;
     }
     
     const response = await this.request<{
@@ -191,6 +194,8 @@ class ApiClient {
       notifications: boolean;
       websocket: boolean;
     };
+    client_ip?: string;
+    private_ip?: string;
   }) {
     return this.request<{
       success: boolean;

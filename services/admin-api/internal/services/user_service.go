@@ -73,9 +73,9 @@ func (s *UserService) CreateUser(req *models.UserCreateRequest) (*models.User, e
 	user := &models.User{
 		Username:  req.Username,
 		Email:     req.Email,
-		Password:  string(hashedPassword),
-		Nickname:  req.Nickname,
-		Status:    "active",
+		Password:  string(hashedPassword), // 已映射到 password_hash
+		// Nickname 在 users 表不存在，不入库
+		Status:    1, // 默认active
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -99,7 +99,17 @@ func (s *UserService) UpdateUser(id uint, req *models.UserUpdateRequest) (*model
 		return nil, result.Error
 	}
 
-	// 用户名不允许修改，跳过用户名检查
+	// 检查用户名是否已被其他用户使用
+	if req.Username != "" && req.Username != user.Username {
+		var existingUser models.User
+		result := s.db.Where("username = ? AND id != ?", req.Username, id).First(&existingUser)
+		if result.Error == nil {
+			return nil, errors.New("用户名已存在")
+		}
+		if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, result.Error
+		}
+	}
 
 	// 检查邮箱是否已被其他用户使用
 	if req.Email != "" && req.Email != user.Email {
@@ -111,25 +121,47 @@ func (s *UserService) UpdateUser(id uint, req *models.UserUpdateRequest) (*model
 		if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, result.Error
 		}
-		user.Email = req.Email
 	}
 
-	if req.Nickname != "" {
-		user.Nickname = req.Nickname
+	updateMap := map[string]interface{}{}
+	if req.Username != "" {
+		updateMap["username"] = req.Username
 	}
-
+	if req.Email != "" {
+		updateMap["email"] = req.Email
+	}
+	if req.Password != "" {
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, fmt.Errorf("密码加密失败: %v", err)
+		}
+		updateMap["password_hash"] = string(hashedPassword)
+	}
 	if req.Status != "" {
-		user.Status = req.Status
+		// 将字符串状态映射为整型：inactive=0, active=1, suspended=2, banned=3
+		switch req.Status {
+		case "inactive":
+			updateMap["status"] = 0
+		case "active":
+			updateMap["status"] = 1
+		case "suspended":
+			updateMap["status"] = 2
+		case "banned":
+			updateMap["status"] = 3
+		default:
+			// 忽略未知值
+		}
 	}
 
-	user.UpdatedAt = time.Now()
-
-	result = s.db.Save(&user)
-	if result.Error != nil {
-		return nil, result.Error
+	if len(updateMap) == 0 {
+		return &user, nil
 	}
 
-	return &user, nil
+	if err := s.db.Model(&user).Updates(updateMap).Error; err != nil {
+		return nil, err
+	}
+
+	return s.GetUserByID(id)
 }
 
 // DeleteUser 删除用户

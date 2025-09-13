@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -9,19 +10,22 @@ import (
 	"xpaste-sync/internal/middleware"
 	"xpaste-sync/internal/models"
 	"xpaste-sync/internal/services"
+	"xpaste-sync/internal/utils"
 )
 
 // AuthHandler 认证处理器
 type AuthHandler struct {
-	userService *services.UserService
-	db          *gorm.DB
+	userService   *services.UserService
+	deviceService *services.DeviceService
+	db            *gorm.DB
 }
 
 // NewAuthHandler 创建认证处理器
-func NewAuthHandler(userService *services.UserService, db *gorm.DB) *AuthHandler {
+func NewAuthHandler(userService *services.UserService, deviceService *services.DeviceService, db *gorm.DB) *AuthHandler {
 	return &AuthHandler{
-		userService: userService,
-		db:          db,
+		userService:   userService,
+		deviceService: deviceService,
+		db:            db,
 	}
 }
 
@@ -113,8 +117,9 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// 获取客户端IP
-	clientIP := c.ClientIP()
+	// 获取客户端IP信息
+	ipInfo := utils.GetClientIPInfo(c)
+	clientIP := ipInfo.GetBestIP()
 
 	// 用户登录
 	user, err := h.userService.Login(&req, clientIP)
@@ -133,6 +138,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		}
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("Login failed: "+err.Error()))
 		return
+	}
+
+	// 如果提供了设备ID，更新设备IP信息
+	if req.DeviceID != "" && h.deviceService != nil {
+		if err := h.deviceService.UpdateDeviceIP(user.ID, req.DeviceID, ipInfo, req.ClientIP, req.PrivateIP); err != nil {
+			// 设备IP更新失败不影响登录，只记录日志
+			log.Printf("Failed to update device IP for user %d, device %s: %v", user.ID, req.DeviceID, err)
+		}
 	}
 
 	// 生成令牌

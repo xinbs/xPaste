@@ -23,9 +23,9 @@ func (s *ClipboardService) GetAllClipboards(page, limit int, contentType string)
 	var clipboards []models.Clipboard
 	var total int64
 
-	query := s.db.Model(&models.Clipboard{})
+	query := s.db.Model(&models.Clipboard{}).Preload("User")
 	if contentType != "" {
-		query = query.Where("content_type = ?", contentType)
+		query = query.Where("type = ?", contentType)
 	}
 
 	// 获取总数
@@ -82,6 +82,29 @@ func (s *ClipboardService) BatchDeleteClipboards(clipboardIDs []uint) error {
 		return errors.New("没有找到要删除的剪贴板内容")
 	}
 
+	return nil
+}
+
+// RestoreClipboard 恢复剪贴板内容（软删除恢复）
+func (s *ClipboardService) RestoreClipboard(id uint) error {
+	// 如果使用软删除，这里应该恢复deleted_at字段
+	// 目前简单实现，假设有is_deleted字段
+	result := s.db.Model(&models.Clipboard{}).Where("id = ?", id).Update("is_deleted", false)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("剪贴板内容不存在")
+	}
+	return nil
+}
+
+// ClearAllClipboards 清空所有剪贴板内容
+func (s *ClipboardService) ClearAllClipboards() error {
+	result := s.db.Where("1 = 1").Delete(&models.Clipboard{})
+	if result.Error != nil {
+		return result.Error
+	}
 	return nil
 }
 

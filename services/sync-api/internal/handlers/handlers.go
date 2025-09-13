@@ -18,7 +18,7 @@ type Handlers struct {
 // NewHandlers 创建处理器集合
 func NewHandlers(services *services.Services) *Handlers {
 	return &Handlers{
-		AuthHandler:    NewAuthHandler(services.User, services.GetDB()),
+		AuthHandler:    NewAuthHandler(services.User, services.Device, services.GetDB()),
 		DeviceHandler:  NewDeviceHandler(services.Device, services.GetDB()),
 		ClipHandler:    NewClipHandler(services.Clip, services.GetDB()),
 		SettingHandler: NewSettingHandler(services.Setting),

@@ -10,6 +10,7 @@ import (
 
 	"xpaste-sync/internal/models"
 	"xpaste-sync/internal/services"
+	"xpaste-sync/internal/utils"
 )
 
 // DeviceHandler 设备处理器
@@ -59,11 +60,11 @@ func (h *DeviceHandler) RegisterDevice(c *gin.Context) {
 		return
 	}
 
-	// 获取客户端IP
-	clientIP := c.ClientIP()
+	// 获取客户端IP信息
+	ipInfo := utils.GetClientIPInfo(c)
 
 	// 注册设备
-	device, err := h.deviceService.RegisterDevice(userID.(uint), &req, clientIP)
+	device, err := h.deviceService.RegisterDevice(userID.(uint), &req, ipInfo)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseWithMessage("Failed to register device", err.Error()))
 		return

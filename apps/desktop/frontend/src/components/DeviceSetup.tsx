@@ -43,25 +43,35 @@ export default function DeviceSetup({ onComplete }: DeviceSetupProps) {
       return;
     }
 
-    const deviceInfo = {
-      device_id: getOrCreateDeviceId(),
-      name: deviceName.trim(),
-      platform,
-      version: '1.0.0',
-      capabilities: {
-        clipboard_read: true,
-        clipboard_write: true,
-        file_upload: true,
-        image_ocr: false,
-        notifications: true,
-        websocket: true
-      },
-    };
+    try {
+      // 获取本机IP地址
+      const { getLocalIPAddress } = await import('../lib/device');
+      const localIP = await getLocalIPAddress();
+      
+      const deviceInfo = {
+        device_id: getOrCreateDeviceId(),
+        name: deviceName.trim(),
+        platform,
+        version: '1.0.0',
+        capabilities: {
+          clipboard_read: true,
+          clipboard_write: true,
+          file_upload: true,
+          image_ocr: false,
+          notifications: true,
+          websocket: true
+        },
+        private_ip: localIP || undefined
+      };
 
-    const success = await registerDevice(deviceInfo);
-    if (success) {
-      showSuccess('注册成功', '设备注册成功！');
-      onComplete?.();
+      const success = await registerDevice(deviceInfo);
+      if (success) {
+        showSuccess('注册成功', '设备注册成功！');
+        onComplete?.();
+      }
+    } catch (error) {
+      console.error('设备注册失败:', error);
+      showError('注册失败', '设备注册时发生错误');
     }
   };
 

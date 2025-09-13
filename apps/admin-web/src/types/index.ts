@@ -18,6 +18,19 @@ export interface Admin {
   updated_at: string
 }
 
+// 来自后端的用户响应（camelCase，见 UserResponse DTO）
+export interface UserResponse {
+  id: string
+  username: string
+  email: string
+  role: string
+  createdAt: string
+  lastLoginAt?: string
+  isActive: boolean
+  userType: string
+  status: string
+}
+
 // 认证相关类型
 export interface AuthState {
   isAuthenticated: boolean
@@ -32,7 +45,7 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   token: string
-  user: Admin
+  admin: Admin
 }
 
 // 仪表盘统计类型

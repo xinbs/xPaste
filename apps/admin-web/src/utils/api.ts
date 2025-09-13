@@ -1,7 +1,7 @@
 import axios from 'axios'
 
-// API基础配置
-const API_BASE_URL = 'http://localhost:8081'
+// API基础配置：优先使用环境变量，未设置则回退到本地默认端口 8083
+const API_BASE_URL = (import.meta as any).env?.VITE_ADMIN_API_BASE_URL || 'http://localhost:8083'
 
 // 创建axios实例
 export const api = axios.create({

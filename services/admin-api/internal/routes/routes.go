@@ -61,6 +61,8 @@ func SetupRoutes(r *gin.Engine) {
 				clipboard.GET("/:id", clipboardController.GetClipboardByID)
 				clipboard.DELETE("/:id", clipboardController.DeleteClipboard)
 				clipboard.POST("/batch-delete", clipboardController.BatchDeleteClipboards)
+				clipboard.POST("/:id/restore", clipboardController.RestoreClipboard)
+				clipboard.POST("/clear-all", clipboardController.ClearAllClipboards)
 				clipboard.GET("/stats", clipboardController.GetClipboardStats)
 			}
 

@@ -1,23 +1,23 @@
 import React from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../utils/api'
-import type { User, ApiResponse, PaginatedResponse } from '../types'
+import type { ApiResponse, UserResponse } from '../types'
 
 const Users: React.FC = () => {
   const queryClient = useQueryClient()
 
-  // 获取用户列表
-  const { data: usersData, isLoading, error } = useQuery({
+  // 获取用户列表（后端返回为数组，不是分页）
+  const { data: usersData, isLoading, error } = useQuery<UserResponse[]>({
     queryKey: ['users'],
     queryFn: async () => {
-      const response = await api.get<ApiResponse<PaginatedResponse<User>>>('/api/v1/users/')
-      return response.data.data
+      const response = await api.get<ApiResponse<UserResponse[]>>('/api/v1/users/')
+      return response.data.data || []
     }
   })
 
   // 删除用户
   const deleteMutation = useMutation({
-    mutationFn: async (userId: number) => {
+    mutationFn: async (userId: string) => {
       await api.delete(`/api/v1/users/${userId}`)
     },
     onSuccess: () => {
@@ -25,7 +25,7 @@ const Users: React.FC = () => {
     }
   })
 
-  const handleDelete = (userId: number, username: string) => {
+  const handleDelete = (userId: string, username: string) => {
     if (window.confirm(`确定要删除用户 "${username}" 吗？`)) {
       deleteMutation.mutate(userId)
     }
@@ -58,7 +58,7 @@ const Users: React.FC = () => {
 
       <div className="bg-white shadow overflow-hidden sm:rounded-md">
         <ul className="divide-y divide-gray-200">
-          {usersData?.items?.map((user) => (
+          {usersData?.map((user) => (
             <li key={user.id} className="px-6 py-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
@@ -98,7 +98,7 @@ const Users: React.FC = () => {
         </ul>
       </div>
 
-      {usersData?.items?.length === 0 && (
+      {usersData && usersData.length === 0 && (
         <div className="text-center py-12">
           <div className="text-gray-500">暂无用户数据</div>
         </div>

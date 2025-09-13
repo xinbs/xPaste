@@ -75,6 +75,18 @@ func New() (*App, error) {
 	// 创建 Gin 引擎
 	router := gin.New()
 
+	// 配置可信代理 - 只信任本地和私有网络
+	trustedProxies := []string{
+		"127.0.0.1",      // 本地回环
+		"::1",            // IPv6本地回环
+		"10.0.0.0/8",     // 私有网络A类
+		"172.16.0.0/12",  // 私有网络B类
+		"192.168.0.0/16", // 私有网络C类
+	}
+	if err := router.SetTrustedProxies(trustedProxies); err != nil {
+		return nil, fmt.Errorf("failed to set trusted proxies: %w", err)
+	}
+
 	// 添加全局中间件
 	router.Use(logger.GinLogger())
 	router.Use(logger.GinRecovery())

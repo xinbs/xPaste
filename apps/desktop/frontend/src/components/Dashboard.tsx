@@ -441,10 +441,15 @@ export default function Dashboard() {
       console.log('注册设备按钮被点击');
       try {
         console.log('开始导入设备相关模块...');
-        const { getDeviceName, getDevicePlatform } = await import('../lib/device');
+        const { getDeviceName, getDevicePlatform, getLocalIPAddress } = await import('../lib/device');
         const { getOrCreateDeviceId } = await import('../lib/device');
         const deviceId = getOrCreateDeviceId();
         console.log('设备ID:', deviceId);
+        
+        // 获取本机IP地址
+        console.log('获取本机IP地址...');
+        const localIP = await getLocalIPAddress();
+        console.log('本机IP地址:', localIP);
         
         const deviceInfo = {
           device_id: deviceId,
@@ -458,7 +463,8 @@ export default function Dashboard() {
             image_ocr: false,
             notifications: true,
             websocket: true
-          }
+          },
+          private_ip: localIP || undefined
         };
         
         console.log('准备注册设备:', deviceInfo);

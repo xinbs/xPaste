@@ -22,7 +22,8 @@ func NewDeviceService() *DeviceService {
 // GetAllDevices 获取所有设备
 func (s *DeviceService) GetAllDevices() ([]models.Device, error) {
 	var devices []models.Device
-	result := s.db.Find(&devices)
+	// 预加载用户信息
+	result := s.db.Preload("User").Find(&devices)
 	return devices, result.Error
 }
 
@@ -50,7 +51,8 @@ func (s *DeviceService) DisconnectDevice(id uint) error {
 		return result.Error
 	}
 
-	device.Status = "offline"
+	// 设置为离线状态
+	device.IsOnline = false
 	now := time.Now()
 	device.LastSeen = &now
 	device.UpdatedAt = time.Now()
