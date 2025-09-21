@@ -103,24 +103,21 @@ class ApiClient {
       (headers as Record<string, string>).Authorization = `Bearer ${this.token}`;
     }
 
-    // 使用传入的signal或创建新的controller
-    let controller: AbortController | null = null;
+    const { signal, ...restOptions } = options;
+    const fetchOptions: RequestInit = { ...restOptions, headers };
+
     let timeoutId: NodeJS.Timeout | null = null;
-    let signal = options.signal;
-    
-    // 只有在没有传入signal时才创建新的controller和超时
-    if (!signal) {
-      controller = new AbortController();
-      signal = controller.signal;
-      timeoutId = setTimeout(() => controller!.abort(), 10000); // 10秒超时
+
+    if (signal instanceof AbortSignal) {
+      fetchOptions.signal = signal;
+    } else {
+      const controller = new AbortController();
+      fetchOptions.signal = controller.signal;
+      timeoutId = setTimeout(() => controller.abort(), 10000); // 10-second timeout
     }
 
     try {
-      const response = await fetch(url, {
-        ...options,
-        headers,
-        signal,
-      });
+      const response = await fetch(url, fetchOptions);
 
       if (timeoutId) {
         clearTimeout(timeoutId);
@@ -239,12 +236,16 @@ class ApiClient {
   }
 
   // 剪贴板相关API
-  async getClipItems(signal?: AbortSignal) {
+  async getClipItems(params: { page: number; pageSize: number }, signal?: AbortSignal) {
+    const query = new URLSearchParams({
+      page: String(params.page),
+      limit: String(params.pageSize),
+    }).toString();
     return this.request<{
       success: boolean;
       message: string;
       data: { items: any[]; pagination: any };
-    }>('/clips', {
+    }>(`/clips?${query}`, {
       signal,
     });
   }

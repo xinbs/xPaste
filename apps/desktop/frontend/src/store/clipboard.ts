@@ -21,8 +21,15 @@ interface ClipboardState {
   error: string | null;
   isMonitoring: boolean;
   
+  // Pagination
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+  isLoadingMore: boolean;
+
   // Actions
   fetchItems: (signal?: AbortSignal) => Promise<void>;
+  loadMoreItems: () => Promise<void>;
   addItem: (item: Omit<ClipItem, 'id' | 'created_at' | 'updated_at' | 'device_id'>) => Promise<boolean>;
   deleteItem: (id: string) => Promise<boolean>;
   copyToClipboard: (content: string) => Promise<boolean>;
@@ -44,68 +51,88 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
   isLoading: false,
   error: null,
   isMonitoring: false,
+  page: 1,
+  pageSize: 20, // 每页加载20条
+  hasMore: true,
+  isLoadingMore: false,
 
   fetchItems: async (signal?: AbortSignal) => {
-    set({ isLoading: true, error: null });
-    console.log('剪贴板Store: 开始获取剪贴板历史...');
+    set({ isLoading: true, error: null, page: 1, hasMore: true });
+    console.log('剪贴板Store: 开始获取第一页剪贴板历史...');
     
     try {
-      const response = await apiClient.getClipItems(signal);
-      console.log('剪贴板Store: API响应', {
-        success: response.success,
-        message: response.message,
-        dataLength: response.data?.items?.length || 0,
-        fullResponse: response
-      });
+      const response = await apiClient.getClipItems(
+        { page: 1, pageSize: get().pageSize },
+        signal
+      );
       
       if (response.success) {
         const items = response.data.items || [];
-        console.log('剪贴板Store: 成功获取', items.length, '条历史记录');
-        set({ items, isLoading: false, error: null }); // 清除错误状态
+        set({ 
+          items, 
+          isLoading: false, 
+          page: 1,
+          hasMore: items.length === get().pageSize,
+        });
       } else {
-        console.error('剪贴板Store: API返回失败', response.message);
-        set({ error: response.message, isLoading: false });
-        // 只有在真正失败时才显示错误
+        set({ error: response.message, isLoading: false, hasMore: false });
         useToastStore.getState().showError('获取剪贴板历史失败', response.message);
       }
     } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        console.log('剪贴板Store: 请求被取消');
-        set({ isLoading: false });
+      const errorMessage = error instanceof Error ? error.message : '获取剪贴板历史失败';
+      
+      // 在React严格模式下，组件会重新挂载，导致之前的请求被取消。
+      // 这种取消是预期的，不应被视为错误。
+      if (error instanceof Error && (error.name === 'AbortError' || errorMessage.includes('请求超时或被取消'))) {
+        console.log('剪贴板Store: 获取剪贴板的请求被取消，这在开发模式下是正常行为。');
+        set({ isLoading: false }); // 确保UI状态正确
         return;
       }
       
-      console.error('剪贴板Store: 网络请求异常', {
-        error,
-        message: error instanceof Error ? error.message : '未知错误',
-        stack: error instanceof Error ? error.stack : undefined
-      });
+      set({ error: errorMessage, isLoading: false, hasMore: false });
       
-      const errorMessage = error instanceof Error ? error.message : '获取剪贴板历史失败';
-      set({ error: errorMessage, isLoading: false });
-      
-      // 检查是否是网络错误
-      const isNetworkError = error instanceof Error && (
-        error.message.includes('fetch') ||
-        error.message.includes('Failed to fetch') ||
-        error.message.includes('NetworkError') ||
-        error.message.includes('ERR_NETWORK') ||
-        error.message.includes('请求超时或被取消')
-      );
-      
-      if (isNetworkError) {
-        console.log('检测到网络错误，延迟3秒后检查是否需要显示错误提示');
-        // 延迟检查，给其他请求重试的机会
-        setTimeout(() => {
-          const currentState = get();
-          // 只有在3秒后仍然有错误且没有数据时才显示错误
-          if (currentState.error && currentState.items.length === 0) {
-            useToastStore.getState().showError('获取剪贴板历史失败', errorMessage);
-          }
-        }, 3000);
-      } else {
+      // 仅在没有数据时显示错误
+      if (get().items.length === 0) {
         useToastStore.getState().showError('获取剪贴板历史失败', errorMessage);
       }
+    }
+  },
+
+  loadMoreItems: async () => {
+    const { isLoadingMore, hasMore, page, pageSize, items } = get();
+    if (isLoadingMore || !hasMore) {
+      return;
+    }
+
+    set({ isLoadingMore: true });
+    const nextPage = page + 1;
+    console.log(`剪贴板Store: 开始加载第 ${nextPage} 页...`);
+
+    try {
+      const controller = new AbortController();
+      const response = await apiClient.getClipItems(
+        { 
+          page: nextPage, 
+          pageSize: pageSize 
+        },
+        controller.signal
+      );
+
+      if (response.success) {
+        const newItems = response.data.items || [];
+        set({
+          items: [...items, ...newItems],
+          page: nextPage,
+          hasMore: newItems.length === pageSize,
+          isLoadingMore: false,
+        });
+      } else {
+        set({ error: response.message, isLoadingMore: false, hasMore: false });
+        // 加载更多失败时，不一定要弹窗，可以在UI上给提示
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '加载更多失败';
+      set({ error: errorMessage, isLoadingMore: false, hasMore: false });
     }
   },
 
@@ -123,18 +150,18 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
       });
       
       if (response.success) {
-        // 重新获取列表以确保数据同步
-        try {
-          await get().fetchItems();
-        } catch (fetchError) {
-          // 如果重新获取失败，不影响添加操作的成功状态
-          console.warn('Failed to refresh items after adding:', fetchError);
-        }
-        
-        // 广播到其他设备
-        get().broadcastClipboardChange(response.data);
-        
-        return true;
+          // 重新获取列表以确保数据同步
+          try {
+            await get().fetchItems();
+          } catch (fetchError) {
+            // 如果重新获取失败，不影响添加操作的成功状态
+            console.warn('Failed to refresh items after adding:', fetchError);
+          }
+          
+          // 广播到其他设备
+          get().broadcastClipboardChange(response.data);
+          
+          return true;
       } else {
         set({ error: response.message });
         return false;

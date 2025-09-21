@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuthStore } from '@/store/auth';
 import { useClipboardStore } from '@/store/clipboard';
 import { useWebSocketStore } from '@/store/websocket';
@@ -33,9 +33,15 @@ export default function Dashboard() {
     isMonitoring,
     startMonitoring,
     stopMonitoring,
-    clearError 
+    clearError,
+    hasMore,
+    isLoadingMore,
+    loadMoreItems 
   } = useClipboardStore();
   const { isConnected, connect, disconnect, onlineDevices } = useWebSocketStore();
+
+  const clipboardScrollRef = useRef<HTMLDivElement | null>(null);
+  const clipboardSentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     console.log('Dashboard: useEffect 开始执行...');
@@ -139,6 +145,33 @@ export default function Dashboard() {
       }
     };
   }, []);
+
+  // 无限滚动
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !isLoadingMore && !clipboardLoading) {
+          console.log('滚动到底部，加载更多...');
+          loadMoreItems();
+        }
+      },
+      { 
+        root: clipboardScrollRef.current, // 在滚动容器内观察
+        threshold: 1.0 
+      }
+    );
+
+    const sentinel = clipboardSentinelRef.current;
+    if (sentinel) {
+      observer.observe(sentinel);
+    }
+
+    return () => {
+      if (sentinel) {
+        observer.unobserve(sentinel);
+      }
+    };
+  }, [hasMore, isLoadingMore, clipboardLoading, loadMoreItems]);
 
   const handleAddTextItem = async () => {
     if (!newClipText.trim()) return;
@@ -265,8 +298,8 @@ export default function Dashboard() {
         )}
 
         {/* 主内容区域 */}
-        <div className="flex-1 overflow-y-auto p-1 scrollbar-thin">
-          {clipboardLoading ? (
+        <div ref={clipboardScrollRef} className="flex-1 overflow-y-auto p-1 scrollbar-thin">
+          {clipboardLoading && filteredClipItems.length === 0 ? (
             <div className="flex items-center justify-center h-32">
               <div className="text-center">
                 <RefreshCw className="w-6 h-6 animate-spin text-blue-500 mx-auto mb-1" />
@@ -412,6 +445,15 @@ export default function Dashboard() {
                   </div>
                 ))}
             </div>
+          )}
+
+          {hasMore && <div ref={clipboardSentinelRef} style={{ height: "1px" }} />}
+
+          {/* Loading indicator for pagination */}
+          {clipboardLoading && filteredClipItems.length > 0 && (
+             <div className="flex items-center justify-center py-4">
+                <RefreshCw className="w-5 h-5 animate-spin text-blue-500" />
+             </div>
           )}
         </div>
       </div>

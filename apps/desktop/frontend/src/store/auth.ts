@@ -287,8 +287,8 @@ export const useAuthStore = create<AuthState>()(
             useToastStore.getState().showError('获取设备列表失败', response.message);
           }
         } catch (error) {
-          if (error instanceof Error && error.name === 'AbortError') {
-            console.log('设备Store: 请求被取消');
+          if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('请求超时或被取消'))) {
+            console.log('设备Store: 请求被取消或超时，此为预期行为，不视为错误。');
             set({ isLoading: false });
             return;
           }
