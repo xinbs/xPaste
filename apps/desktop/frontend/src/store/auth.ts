@@ -30,6 +30,17 @@ interface Device {
   last_seen: string;
 }
 
+// 用于注册设备的入参类型（与 apiClient.registerDevice 保持一致）
+type RegisterDeviceInfo = {
+  device_id?: string;
+  name: string;
+  platform: string;
+  version: string;
+  capabilities: DeviceCapabilities;
+  client_ip?: string;
+  private_ip?: string;
+};
+
 interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
@@ -38,13 +49,11 @@ interface AuthState {
   isLoading: boolean;
   error: string | null;
   token: string | null;
-  
-  // Actions
   validateToken: () => Promise<boolean>;
   login: (username: string, password: string) => Promise<boolean>;
   register: (username: string, email: string, password: string) => Promise<boolean>;
   logout: () => void;
-  registerDevice: (deviceInfo: Omit<Device, 'id' | 'is_current' | 'last_seen'>) => Promise<boolean>;
+  registerDevice: (deviceInfo: RegisterDeviceInfo) => Promise<boolean>;
   fetchDevices: (signal?: AbortSignal) => Promise<void>;
   renameDevice: (deviceId: string, newName: string) => Promise<boolean>;
   deleteDevice: (deviceId: string) => Promise<boolean>;
