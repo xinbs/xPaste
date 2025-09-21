@@ -99,8 +99,8 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
   },
 
   loadMoreItems: async () => {
-    const { isLoadingMore, hasMore, page, pageSize, items } = get();
-    if (isLoadingMore || !hasMore) {
+    const { isLoading, isLoadingMore, hasMore, page, pageSize } = get();
+    if (isLoading || isLoadingMore || !hasMore) {
       return;
     }
 
@@ -120,12 +120,12 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
 
       if (response.success) {
         const newItems = response.data.items || [];
-        set({
-          items: [...items, ...newItems],
+        set((state) => ({
+          items: [...state.items, ...newItems],
           page: nextPage,
-          hasMore: newItems.length === pageSize,
+          hasMore: newItems.length === state.pageSize,
           isLoadingMore: false,
-        });
+        }));
       } else {
         set({ error: response.message, isLoadingMore: false, hasMore: false });
         // 加载更多失败时，不一定要弹窗，可以在UI上给提示
