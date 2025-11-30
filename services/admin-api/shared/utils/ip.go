@@ -21,7 +21,9 @@ func GetClientIPInfo(c *gin.Context) *IPInfo {
 	info := &IPInfo{}
 	
 	// 1. 获取Gin的ClientIP（可能受代理影响）
-	info.ClientIP = c.ClientIP()
+	// 注意：如果 TrustedProxies 设置不当，调用 c.ClientIP() 可能会导致问题
+	// 这里我们直接获取 RemoteIP，或者尝试安全地获取
+	info.ClientIP = c.RemoteIP()
 	
 	// 2. 尝试从X-Real-IP头获取真实IP
 	if realIP := c.GetHeader("X-Real-IP"); realIP != "" {

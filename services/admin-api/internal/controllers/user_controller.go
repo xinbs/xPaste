@@ -63,10 +63,10 @@ func (ctrl *UserController) GetAllUsers(c *gin.Context) {
 		return
 	}
 
-	var userResponses []models.UserResponse
-	for _, user := range users {
-		userResponses = append(userResponses, ctrl.convertUserToResponse(user))
-	}
+    userResponses := make([]models.UserResponse, 0, len(users))
+    for _, user := range users {
+        userResponses = append(userResponses, ctrl.convertUserToResponse(user))
+    }
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": userResponses,

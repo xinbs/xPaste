@@ -63,6 +63,48 @@
 pnpm install
 ```
 
+## Docker 部署（推荐）
+
+使用 Docker 可以快速启动所有后端服务和管理后台前端，无需手动配置环境。
+
+### 前置要求
+- Docker
+- Docker Compose
+
+### 快速启动
+
+1. **生成 Go 依赖文件**（首次运行或修改 go.mod 后需要）：
+   ```bash
+   ./scripts/generate-go-sum.sh
+   ```
+
+2. **启动所有服务**：
+   ```bash
+   docker-compose up -d --build
+   ```
+
+3. **查看日志**：
+   ```bash
+   docker-compose logs -f
+   ```
+
+4. **访问服务**：
+   - Sync API: http://localhost:8080
+   - Admin API: http://localhost:8081
+   - Admin Web: http://localhost:3010
+
+5. **停止服务**：
+   ```bash
+   docker-compose down
+   ```
+
+### Docker 服务说明
+- **sync-api**: 同步 API 服务（支持热更新）
+- **admin-api**: 管理后台 API 服务（支持热更新）
+- **admin-web**: 管理后台前端（支持热更新）
+
+所有服务都配置了热更新，修改代码后会自动重新编译/刷新。
+
 ## 快速启动
 
 ### 方式一：使用一键启动脚本（推荐）
@@ -118,7 +160,7 @@ go run main.go
 cd apps/admin-web
 pnpm install  # 首次运行需要安装依赖
 pnpm dev
-# 管理后台前端将在 http://localhost:3001 启动
+# 管理后台前端将在 http://localhost:3010 启动
 ```
 
 #### 5. 启动 Electron 桌面应用
@@ -148,7 +190,7 @@ $env:NODE_ENV="production"; pnpm electron
 - **后端同步API服务**: http://localhost:8080
 - **桌面应用前端**: http://localhost:5173
 - **管理后台API服务**: http://localhost:8081
-- **管理后台前端**: http://localhost:3001
+- **管理后台前端**: http://localhost:3010
 - **WebSocket 连接**: ws://localhost:8080/ws
 
 ### 开发命令参考
@@ -197,7 +239,7 @@ go run cmd/reset-db/main.go
 
 #### 访问管理后台
 1. 确保管理后台API服务和前端都已启动
-2. 在浏览器中访问: http://localhost:3001
+2. 在浏览器中访问: http://localhost:3010
 3. 使用默认管理员账号登录:
    - 用户名: `admin@example.com`
    - 密码: `admin123`

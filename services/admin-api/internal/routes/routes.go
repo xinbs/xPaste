@@ -15,13 +15,13 @@ func SetupRoutes(r *gin.Engine) {
 	clipboardController := controllers.NewClipboardController()
 
 	// API版本分组
-	v1 := r.Group("/api/v1")
-	{
-		// 公开路由（不需要认证）
-		public := v1.Group("/auth")
-		{
-			public.POST("/login", adminController.Login)
-		}
+    v1 := r.Group("/api/v1")
+    {
+        // 公开路由（不需要认证）
+        public := v1.Group("/auth")
+        {
+            public.POST("/login", adminController.Login)
+        }
 
 		// 需要认证的路由
 		protected := v1.Group("/")

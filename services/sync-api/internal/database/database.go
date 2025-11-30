@@ -1,17 +1,16 @@
 package database
 
 import (
-	"database/sql"
+
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"time"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	_ "modernc.org/sqlite"
 
 	"xpaste-sync/internal/config"
 	"xpaste-sync/internal/models"
@@ -53,14 +52,11 @@ func Initialize(cfg *config.Config) error {
 	var err error
 	switch cfg.Database.Driver {
 	case "sqlite":
-		// 使用纯Go SQLite驱动 (modernc.org/sqlite)
+		// 使用纯Go SQLite驱动 (github.com/glebarez/sqlite)
 		// 配置SQLite参数以避免数据库锁定问题
 		sqliteParams := "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(1000)&_pragma=temp_store(memory)"
-		sqlDB, err := sql.Open("sqlite", cfg.Database.DSN+sqliteParams)
-		if err != nil {
-			return fmt.Errorf("failed to open sqlite database: %w", err)
-		}
-		DB, err = gorm.Open(sqlite.Dialector{Conn: sqlDB}, gormConfig)
+		// glebarez/sqlite 不需要 sql.Open，直接传递 DSN
+		DB, err = gorm.Open(sqlite.Open(cfg.Database.DSN+sqliteParams), gormConfig)
 	default:
 		return fmt.Errorf("unsupported database driver: %s", cfg.Database.Driver)
 	}

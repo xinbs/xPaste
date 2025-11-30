@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  sync-api:
+    build:
+      context: ./services/sync-api
+      dockerfile: Dockerfile
+      target: dev
+    container_name: xpaste-sync-api
+    ports:
+      - "8080:8080"
+    environment:
+      - GIN_MODE=debug
+      - DB_TYPE=sqlite
+      - DB_PATH=/data/xpaste.db
+      - LOG_LEVEL=debug
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-key}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+    volumes:
+      - ./services/sync-api:/app
+      - sync-data:/data
+    restart: unless-stopped
+
+  admin-api:
+    build:
+      context: ./services/admin-api
+      dockerfile: Dockerfile
+      target: dev
+    container_name: xpaste-admin-api
+    ports:
+      - "8081:8081"
+    environment:
+      - GIN_MODE=debug
+      - PORT=8081
+      - DB_PATH=/data/xpaste.db
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-key}
+      - ADMIN_API_MIGRATE_ALL=false
+      - CORS_ALLOW_ALL=true
+    volumes:
+      - ./services/admin-api:/app
+      - sync-data:/data
+    restart: unless-stopped
+    depends_on:
+      - sync-api
+
+  admin-web:
+    build:
+      context: ./apps/admin-web
+      dockerfile: Dockerfile
+      target: dev
+    container_name: xpaste-admin-web
+    ports:
+      - "3010:3010"
+    # 不设置 VITE_ADMIN_API_BASE_URL，让前端自动使用当前主机地址
+    volumes:
+      - ./apps/admin-web:/app
+      - /app/node_modules
+    restart: unless-stopped
+    depends_on:
+      - admin-api
+
+volumes:
+  sync-data:
+    driver: local

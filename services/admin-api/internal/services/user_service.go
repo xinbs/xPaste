@@ -1,14 +1,13 @@
 package services
 
 import (
-	"errors"
-	"fmt"
-	"time"
+    "errors"
+    "fmt"
 
-	"admin-api/shared/database"
-	"admin-api/shared/models"
-	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
+    "admin-api/shared/database"
+    "admin-api/shared/models"
+    "golang.org/x/crypto/bcrypt"
+    "gorm.io/gorm"
 )
 
 type UserService struct {
@@ -23,9 +22,9 @@ func NewUserService() *UserService {
 
 // GetAllUsers 获取所有用户
 func (s *UserService) GetAllUsers() ([]models.User, error) {
-	var users []models.User
-	result := s.db.Find(&users)
-	return users, result.Error
+    var users []models.User
+    result := s.db.Model(&models.User{}).Order("created_at DESC").Find(&users)
+    return users, result.Error
 }
 
 // GetUserByID 根据ID获取用户
@@ -70,15 +69,12 @@ func (s *UserService) CreateUser(req *models.UserCreateRequest) (*models.User, e
 		return nil, fmt.Errorf("密码加密失败: %v", err)
 	}
 
-	user := &models.User{
-		Username:  req.Username,
-		Email:     req.Email,
-		Password:  string(hashedPassword), // 已映射到 password_hash
-		// Nickname 在 users 表不存在，不入库
-		Status:    1, // 默认active
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
+    user := &models.User{
+        Username:  req.Username,
+        Email:     req.Email,
+        Password:  string(hashedPassword),
+        Status:    1,
+    }
 
 	result = s.db.Create(user)
 	if result.Error != nil {

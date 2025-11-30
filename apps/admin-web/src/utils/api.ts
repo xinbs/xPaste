@@ -1,7 +1,24 @@
 import axios from 'axios'
 
-// API基础配置：优先使用环境变量，未设置则回退到本地默认端口 8083
-const API_BASE_URL = (import.meta as any).env?.VITE_ADMIN_API_BASE_URL || 'http://localhost:8083'
+// API基础配置：优先使用环境变量，未设置则使用当前主机的8081端口
+const getApiBaseUrl = () => {
+  // 如果有环境变量配置，使用环境变量
+  const envUrl = (import.meta as any).env?.VITE_ADMIN_API_BASE_URL
+  if (envUrl) {
+    console.log('[API配置] 使用环境变量:', envUrl)
+    return envUrl
+  }
+  
+  // 否则使用当前访问的主机名 + 8081端口
+  const protocol = window.location.protocol
+  const hostname = window.location.hostname
+  const url = `${protocol}//${hostname}:8081`
+  console.log('[API配置] 自动获取地址:', url)
+  return url
+}
+
+const API_BASE_URL = getApiBaseUrl()
+console.log('[API配置] 最终API地址:', API_BASE_URL)
 
 // 创建axios实例
 export const api = axios.create({
@@ -37,7 +54,7 @@ api.interceptors.response.use(
       const oldToken = localStorage.getItem('admin_token')
       localStorage.removeItem('admin_token')
       localStorage.removeItem('admin_user')
-      
+
       // 触发storage事件，通知AuthContext更新状态
       window.dispatchEvent(new StorageEvent('storage', {
         key: 'admin_token',
@@ -50,8 +67,19 @@ api.interceptors.response.use(
 )
 
 // ============== 新增：Sync API 客户端 ==============
-// Sync API 基础配置：优先使用环境变量，未设置则回退到本地默认端口 8080
-const SYNC_API_BASE_URL = (import.meta as any).env?.VITE_SYNC_API_BASE_URL || 'http://localhost:8080'
+// Sync API 基础配置：优先使用环境变量，未设置则使用当前主机的8080端口
+const getSyncApiBaseUrl = () => {
+  const envUrl = (import.meta as any).env?.VITE_SYNC_API_BASE_URL
+  if (envUrl) {
+    return envUrl
+  }
+  
+  const protocol = window.location.protocol
+  const hostname = window.location.hostname
+  return `${protocol}//${hostname}:8080`
+}
+
+const SYNC_API_BASE_URL = getSyncApiBaseUrl()
 
 export const syncApi = axios.create({
   baseURL: SYNC_API_BASE_URL,

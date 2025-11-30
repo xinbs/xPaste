@@ -27,16 +27,20 @@ func main() {
 		gin.SetMode(gin.DebugMode)
 	}
 
-	// 创建Gin引擎
-	r := gin.Default()
+    r := gin.Default()
+    r.SetTrustedProxies([]string{"0.0.0.0/0", "::/0"})
 
-	// 配置CORS
-	config := cors.DefaultConfig()
-	config.AllowOrigins = []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:5173"}
-	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
-	config.AllowHeaders = []string{"Origin", "Content-Type", "Authorization"}
-	config.AllowCredentials = true
-	r.Use(cors.New(config))
+    config := cors.DefaultConfig()
+    if os.Getenv("CORS_ALLOW_ALL") == "true" {
+        config.AllowAllOrigins = true
+    } else {
+        config.AllowOrigins = []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:3010", "http://localhost:5173"}
+    }
+    config.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+    config.AllowHeaders = []string{"Origin", "Content-Type", "content-type", "Accept", "Authorization", "X-Requested-With", "X-CSRF-Token", "Sec-Fetch-Mode", "Sec-Fetch-Site", "Sec-Fetch-Dest"}
+    config.ExposeHeaders = []string{"Content-Length"}
+    config.AllowCredentials = true
+    r.Use(cors.New(config))
 
 	// 设置路由
 	routes.SetupRoutes(r)

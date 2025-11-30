@@ -11,7 +11,7 @@ import (
 	"admin-api/shared/utils"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 )
 
 var DB *gorm.DB
@@ -181,7 +181,16 @@ func CountTodayClipboards(today string) int {
 
 // AutoMigrate 自动迁移数据库表
 func AutoMigrate() error {
-	return DB.AutoMigrate(&models.Admin{})
+    migrateAll := getEnv("ADMIN_API_MIGRATE_ALL", "false")
+    if migrateAll == "true" {
+        return DB.AutoMigrate(
+            &models.User{},
+            &models.Device{},
+            &models.Clipboard{},
+            &models.Admin{},
+        )
+    }
+    return DB.AutoMigrate(&models.Admin{})
 }
 
 // getEnv 获取环境变量
