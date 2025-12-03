@@ -29,6 +29,15 @@ export interface ElectronAPI {
   // 托盘事件监听
   on: (channel: string, callback: (...args: any[]) => void) => void;
   removeListener: (channel: string, callback: (...args: any[]) => void) => void;
+  
+  // 日志
+  log: (message: string, data?: any) => void;
+  syncToken: (token: string) => void;
+  onRequestToken: (callback: () => void) => void;
+
+  // 服务器配置同步
+  syncServerConfig: (config: { apiBaseUrl?: string; baseUrl?: string }) => void;
+  onRequestServerConfig: (callback: () => void) => void;
 }
 
 declare global {

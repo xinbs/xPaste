@@ -68,6 +68,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('update-downloaded', callback);
   },
   installUpdate: () => ipcRenderer.invoke('install-update')
+  ,
+  // 日志与令牌同步
+  log: (message, data) => ipcRenderer.send('renderer-log', message, data),
+  syncToken: (token) => ipcRenderer.send('sync-token', token),
+  onRequestToken: (callback) => {
+    // 避免重复注册
+    ipcRenderer.removeAllListeners('request-token');
+    ipcRenderer.on('request-token', callback);
+    return () => ipcRenderer.removeListener('request-token', callback);
+  }
+  ,
+  // 通用事件监听（与主进程通道约定）
+  on: (channel, callback) => {
+    const validChannels = ['toggle-clipboard-monitoring', 'switch-to-tab', 'clipboard-changed'];
+    if (validChannels.includes(channel)) {
+      ipcRenderer.on(channel, callback);
+      return () => ipcRenderer.removeListener(channel, callback);
+    }
+  },
+  removeListener: (channel, callback) => {
+    const validChannels = ['toggle-clipboard-monitoring', 'switch-to-tab', 'clipboard-changed'];
+    if (validChannels.includes(channel)) {
+      ipcRenderer.removeListener(channel, callback);
+    }
+  }
 });
 
 // 类型定义（用于TypeScript支持）
@@ -98,5 +123,13 @@ if (typeof window !== 'undefined') {
     onUpdateAvailable: (callback) => () => {},
     onUpdateDownloaded: (callback) => () => {},
     installUpdate: () => Promise.resolve()
+    ,
+    // 运行时兜底：日志与令牌同步（在真实环境中由 preload 注入）
+    log: (message, data) => Promise.resolve(),
+    syncToken: (token) => Promise.resolve(),
+    onRequestToken: (callback) => () => {}
+    ,
+    on: (channel, callback) => () => {},
+    removeListener: (channel, callback) => {}
   };
 }

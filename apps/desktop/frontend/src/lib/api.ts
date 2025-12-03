@@ -239,7 +239,7 @@ class ApiClient {
   async getClipItems(params: { page: number; pageSize: number }, signal?: AbortSignal) {
     const query = new URLSearchParams({
       page: String(params.page),
-      limit: String(params.pageSize),
+      page_size: String(params.pageSize),
     }).toString();
     return this.request<{
       success: boolean;

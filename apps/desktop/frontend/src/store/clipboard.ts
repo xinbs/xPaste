@@ -45,6 +45,7 @@ interface ClipboardState {
 let monitoringInterval: NodeJS.Timeout | null = null;
 let lastClipboardContent = '';
 let lastClipboardImageHash = '';
+let clipboardIpcHandler: any = null;
 
 export const useClipboardStore = create<ClipboardState>()((set, get) => ({
   items: [],
@@ -203,43 +204,132 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
   },
 
   startMonitoring: () => {
-    console.log('剪贴板Store: 尝试启动监听 - 当前状态:', { 
-      monitoringInterval: !!monitoringInterval,
-      isMonitoring: get().isMonitoring 
-    });
+    if (get().isMonitoring) return;
     
-    if (monitoringInterval) {
-      console.log('剪贴板Store: 监听已在运行，跳过');
+    set({ isMonitoring: true });
+
+    // 1. Electron 环境：使用 IPC 监听主进程消息 (支持后台监控)
+    if (window.electronAPI) {
+      console.log('启动 Electron IPC 剪贴板监控');
+      
+      // 清理旧的监听器（如果有）
+      if (clipboardIpcHandler) {
+        window.electronAPI.removeListener('clipboard-changed', clipboardIpcHandler);
+      }
+
+      // 定义新的监听处理函数
+      clipboardIpcHandler = (_event: any, data: any) => {
+        console.log('收到主进程剪贴板更新:', data.type);
+        
+        // 如果主进程已经保存了数据，我们只需要刷新列表
+        if (data.savedByMain) {
+            if (window.electronAPI && window.electronAPI.log) {
+              window.electronAPI.log('主进程已保存数据，前端仅刷新列表');
+            }
+            // 更新本地状态以避免重复添加
+            if (data.type === 'text') {
+                lastClipboardContent = data.content;
+                lastClipboardImageHash = '';
+            } else if (data.type === 'image') {
+                lastClipboardImageHash = data.content;
+                lastClipboardContent = '';
+            }
+            
+            get().fetchItems();
+            return;
+        }
+
+        if (window.electronAPI && window.electronAPI.log) {
+          window.electronAPI.log('收到剪贴板 IPC 消息', { type: data.type, contentLength: data.content?.length });
+        }
+        
+        if (data.type === 'text') {
+          // 文本去重检查
+          if (data.content && data.content !== lastClipboardContent) {
+            lastClipboardContent = data.content;
+            lastClipboardImageHash = ''; // 清除图片状态
+            
+            if (window.electronAPI && window.electronAPI.log) {
+              window.electronAPI.log('准备添加文本记录', { content: data.content.substring(0, 20) + '...' });
+            }
+
+            get().addItem({
+              type: 'text',
+              content: data.content,
+              metadata: {
+                source: 'electron_monitor',
+                auto_detected: true,
+              },
+            }).then(success => {
+               if (window.electronAPI && window.electronAPI.log) {
+                 window.electronAPI.log('添加文本记录结果', { success });
+               }
+            }).catch(err => {
+               if (window.electronAPI && window.electronAPI.log) {
+                 window.electronAPI.log('添加文本记录失败', { error: err.message });
+               }
+               console.error(err);
+            });
+          } else {
+             if (window.electronAPI && window.electronAPI.log) {
+               window.electronAPI.log('文本内容重复，跳过');
+             }
+          }
+        } else if (data.type === 'image') {
+          // 图片去重检查 (data.content 是 DataURL)
+          if (data.content && data.content !== lastClipboardImageHash) {
+            lastClipboardImageHash = data.content;
+            lastClipboardContent = ''; // 清除文本状态
+            
+            if (window.electronAPI && window.electronAPI.log) {
+              window.electronAPI.log('准备添加图片记录');
+            }
+            
+            get().addItem({
+              type: 'image',
+              content: data.content, // DataURL
+              metadata: {
+                source: 'electron_monitor',
+                auto_detected: true,
+                mime_type: 'image/png', // 主进程通过 toDataURL 返回的一般是 png
+              },
+            }).then(success => {
+               if (window.electronAPI && window.electronAPI.log) {
+                 window.electronAPI.log('添加图片记录结果', { success });
+               }
+            }).catch(err => {
+               if (window.electronAPI && window.electronAPI.log) {
+                 window.electronAPI.log('添加图片记录失败', { error: err.message });
+               }
+               console.error(err);
+            });
+          }
+        }
+      };
+
+      // 注册监听
+      window.electronAPI.on('clipboard-changed', clipboardIpcHandler);
       return;
     }
-    
-    console.log('剪贴板Store: 启动剪贴板监听...');
-    set({ isMonitoring: true });
-    
-    // 初始化当前剪贴板内容
-    navigator.clipboard.readText().then(text => {
-      lastClipboardContent = text;
-    }).catch(() => {
-      // 忽略权限错误
-    });
-    
+
+    // 2. Web 环境：使用轮询 (原有逻辑)
+    if (monitoringInterval) clearInterval(monitoringInterval);
     monitoringInterval = setInterval(async () => {
       try {
-        // 使用 navigator.clipboard.read() 来检测所有类型的剪贴板内容
+        // 尝试读取剪贴板项目（现代浏览器 API）
         const clipboardItems = await navigator.clipboard.read();
-        
         for (const clipboardItem of clipboardItems) {
           // 检查文本内容
           if (clipboardItem.types.includes('text/plain')) {
-            const textBlob = await clipboardItem.getType('text/plain');
-            const currentContent = await textBlob.text();
+            const blob = await clipboardItem.getType('text/plain');
+            const text = await blob.text();
             
-            if (currentContent && currentContent !== lastClipboardContent) {
-              lastClipboardContent = currentContent;
+            if (text && text !== lastClipboardContent) {
+              lastClipboardContent = text;
               
               const success = await get().addItem({
                 type: 'text',
-                content: currentContent,
+                content: text,
                 metadata: {
                   source: 'auto_monitor',
                   auto_detected: true,
@@ -337,6 +427,12 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
       clearInterval(monitoringInterval);
       monitoringInterval = null;
     }
+    
+    if (window.electronAPI && clipboardIpcHandler) {
+      window.electronAPI.removeListener('clipboard-changed', clipboardIpcHandler);
+      clipboardIpcHandler = null;
+    }
+    
     set({ isMonitoring: false });
   },
 

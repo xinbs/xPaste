@@ -37,15 +37,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // 监听托盘事件
   on: (channel, callback) => {
-    const validChannels = ['toggle-clipboard-monitoring', 'switch-to-tab'];
+    const validChannels = ['toggle-clipboard-monitoring', 'switch-to-tab', 'clipboard-changed'];
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, callback);
     }
   },
   removeListener: (channel, callback) => {
-    const validChannels = ['toggle-clipboard-monitoring', 'switch-to-tab'];
+    const validChannels = ['toggle-clipboard-monitoring', 'switch-to-tab', 'clipboard-changed'];
     if (validChannels.includes(channel)) {
       ipcRenderer.removeListener(channel, callback);
     }
-  }
+  },
+  
+  // 发送日志到主进程
+  log: (message, data) => ipcRenderer.send('renderer-log', message, data),
+  syncToken: (token) => ipcRenderer.send('sync-token', token),
+  onRequestToken: (callback) => {
+    // 先移除所有监听器，确保只注册一个
+    ipcRenderer.removeAllListeners('request-token');
+    ipcRenderer.on('request-token', callback);
+  },
+  // 同步服务器配置（例如 API 基地址）
+  syncServerConfig: (config) => ipcRenderer.send('sync-server-config', config),
+  // 监听主进程请求服务器配置
+  onRequestServerConfig: (callback) => {
+    ipcRenderer.removeAllListeners('request-server-config');
+    ipcRenderer.on('request-server-config', callback);
+  },
 });

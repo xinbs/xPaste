@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuthStore } from '@/store/auth';
 import { useClipboardStore } from '@/store/clipboard';
 import { useWebSocketStore } from '@/store/websocket';
+import { useConfigStore } from '@/store/config';
 import { Copy, Monitor, LogOut, Plus, Trash2, Upload, Play, Pause, X, RefreshCw, Edit2, Settings as SettingsIcon, Search, Type, Image as ImageIcon, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import FileUpload, { FilePreview } from '@/components/FileUpload';
@@ -20,7 +21,7 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'text' | 'image' | 'file'>('all');
   
-  const { user, devices, currentDevice, logout, fetchDevices, renameDevice, deleteDevice, isAuthenticated, registerDevice } = useAuthStore();
+  const { user, devices, currentDevice, logout, fetchDevices, renameDevice, deleteDevice, isAuthenticated, registerDevice, token } = useAuthStore();
   const { 
     items: clipItems, 
     fetchItems: fetchClipItems, 
@@ -42,6 +43,105 @@ export default function Dashboard() {
 
   const clipboardScrollRef = useRef<HTMLDivElement | null>(null);
   const clipboardSentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // 使用 useRef 存储最新的 token，以便在事件回调中访问
+  const tokenRef = useRef(token);
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
+
+  // 专门处理 Token 同步和监听的 useEffect
+  useEffect(() => {
+    if (!window.electronAPI) return;
+
+    const syncTokenToMain = () => {
+        const currentToken = tokenRef.current;
+        if (currentToken && window.electronAPI.syncToken) {
+            window.electronAPI.log('Dashboard: 同步 Token 到主进程');
+            window.electronAPI.syncToken(currentToken);
+        } else {
+            window.electronAPI.log('Dashboard: 收到同步请求，但 Token 为空或 API 不可用');
+        }
+    };
+
+    // 初始同步
+    if (token) {
+        window.electronAPI.log('Dashboard: Token 变化，主动同步');
+        syncTokenToMain();
+    }
+
+    // 注册监听器 (preload 已处理去重)
+    if (window.electronAPI.onRequestToken) {
+        window.electronAPI.onRequestToken(() => {
+            window.electronAPI.log('Dashboard: 收到主进程 Token 请求，正在响应...');
+            syncTokenToMain();
+        });
+    }
+
+    // 周期性保活检查 (每 5 秒)
+    const intervalId = setInterval(() => {
+        const currentToken = tokenRef.current;
+        window.electronAPI.log('Dashboard: 保活检查 - Token状态: ' + (currentToken ? '存在' : '丢失'));
+        // 强制同步一次，以确保主进程持有 Token。
+        if (currentToken) {
+            syncTokenToMain();
+        }
+    }, 5000);
+
+    // 窗口获得焦点时也尝试同步
+    const handleFocus = () => {
+        syncTokenToMain();
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+        window.removeEventListener('focus', handleFocus);
+        clearInterval(intervalId);
+    };
+  }, [token]);
+
+  // 同步服务器配置（API 基地址）到主进程，并响应主进程请求
+  const { serverConfig, getApiUrl } = useConfigStore();
+  useEffect(() => {
+    if (!window.electronAPI) return;
+
+    const syncServerConfigToMain = () => {
+      try {
+        const apiBaseUrl = getApiUrl();
+        window.electronAPI.log('Dashboard: 同步服务器配置到主进程', { apiBaseUrl });
+        window.electronAPI.syncServerConfig({ apiBaseUrl });
+      } catch (err) {
+        console.error('同步服务器配置失败:', err);
+      }
+    };
+
+    // 初始同步与服务器地址变动时同步
+    syncServerConfigToMain();
+
+    // 响应主进程请求
+    if (window.electronAPI.onRequestServerConfig) {
+      window.electronAPI.onRequestServerConfig(() => {
+        window.electronAPI.log('Dashboard: 收到主进程服务器配置请求，正在响应...');
+        syncServerConfigToMain();
+      });
+    }
+  }, [serverConfig.baseUrl]);
+
+  useEffect(() => {
+    // 早期注册：确保尽快响应主进程的 Token 请求，避免在初次保存时丢失请求
+    // 使用 tokenRef 读取最新 Token，避免闭包捕获旧值
+    if (window.electronAPI && window.electronAPI.onRequestToken) {
+      window.electronAPI.onRequestToken(() => {
+        const currentToken = tokenRef.current;
+        if (currentToken && window.electronAPI.syncToken) {
+          window.electronAPI.log('Dashboard: 收到主进程 Token 请求(早期注册)，正在响应...');
+          window.electronAPI.syncToken(currentToken);
+        } else {
+          window.electronAPI.log('Dashboard: 收到主进程 Token 请求，但当前 Token 不可用');
+        }
+      });
+    }
+  }, []);
 
   useEffect(() => {
     console.log('Dashboard: useEffect 开始执行...');

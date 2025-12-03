@@ -1,8 +1,56 @@
-const { app, BrowserWindow, Menu, shell, ipcMain, dialog, Tray, nativeImage } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain, dialog, Tray, nativeImage, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 const isDev = process.env.NODE_ENV === 'development';
+// Token 存储模式：默认磁盘，可通过环境变量切换为内存
+// 可选值：'disk' | 'memory'
+const TOKEN_STORAGE_MODE = (process.env.TOKEN_STORAGE || 'disk').toLowerCase();
+
+// Token 持久化相关逻辑
+const TOKEN_FILE_NAME = 'auth-token.json';
+
+function getTokenPath() {
+  const userDataPath = app.getPath('userData');
+  // 确保 userData 目录存在
+  if (!fs.existsSync(userDataPath)) {
+      fs.mkdirSync(userDataPath, { recursive: true });
+  }
+  return path.join(userDataPath, TOKEN_FILE_NAME);
+}
+
+function saveTokenToDisk(token) {
+  try {
+    const tokenPath = getTokenPath();
+    fs.writeFileSync(tokenPath, JSON.stringify({ token }), 'utf-8');
+    console.log('Token 已保存到本地磁盘:', tokenPath);
+  } catch (error) {
+    console.error('保存 Token 到磁盘失败:', error);
+  }
+}
+
+function loadTokenFromDisk() {
+  try {
+    const tokenPath = getTokenPath();
+    console.log('尝试从磁盘加载 Token，路径:', tokenPath);
+    if (fs.existsSync(tokenPath)) {
+      const data = fs.readFileSync(tokenPath, 'utf-8');
+      console.log('Token 文件内容:', data);
+      const parsed = JSON.parse(data);
+      if (parsed && parsed.token) {
+        console.log('从本地磁盘成功加载 Token');
+        return parsed.token;
+      } else {
+          console.log('Token 文件格式不正确或 Token 为空');
+      }
+    } else {
+        console.log('Token 文件不存在');
+    }
+  } catch (error) {
+    console.error('从磁盘加载 Token 失败:', error);
+  }
+  return null;
+}
 
 // 跨平台图标路径获取函数
 function getWindowIcon() {
@@ -86,6 +134,7 @@ function getTrayIconPaths() {
   } else if (platform === 'darwin') {
     // macOS: PNG 格式，16x16 和 32x32，Template 图标适配明暗主题
     paths.push(
+      path.join(assetsDir, 'tray-icon-template.svg'), // 优先使用 SVG Template
       path.join(assetsDir, 'tray-iconTemplate.png'), // macOS 推荐的 Template 图标
       path.join(assetsDir, 'tray-icon.png'),
       path.join(assetsDir, 'icon.png'),
@@ -175,6 +224,235 @@ let mainWindow;
 let settingsWindow;
 let tray;
 
+// 剪贴板监控相关变量
+let clipboardMonitorInterval;
+let lastClipboardText = '';
+let lastClipboardImage = '';
+
+// API 相关
+let authToken = null;
+// 允许从渲染进程动态同步 API 基地址；默认指向本地开发服务
+let apiBaseUrl = 'http://localhost:8080/api/v1';
+// 待保存队列
+let pendingSaveQueue = [];
+
+function flushPendingQueue() {
+  try {
+    if (!authToken || pendingSaveQueue.length === 0) return;
+    console.log(`发现 ${pendingSaveQueue.length} 个待保存项目，开始处理...`);
+    const queue = [...pendingSaveQueue];
+    pendingSaveQueue = [];
+    queue.forEach(item => {
+      saveClipItemToApi(item.type, item.content).then(saved => {
+        if (saved && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('clipboard-changed', {
+            type: item.type,
+            content: item.content,
+            timestamp: item.timestamp,
+            savedByMain: true
+          });
+        }
+      });
+    });
+  } catch (err) {
+    console.error('处理待保存队列时出错:', err);
+  }
+}
+async function saveClipItemToApi(type, content) {
+  if (!authToken) {
+    // 仅在磁盘模式下尝试从磁盘恢复 Token
+    if (TOKEN_STORAGE_MODE === 'disk') {
+      const diskToken = loadTokenFromDisk();
+      if (diskToken) {
+          authToken = diskToken;
+          console.log('从磁盘恢复 Token，继续保存...');
+          if (pendingSaveQueue.length > 0) {
+            flushPendingQueue();
+          }
+      } else {
+          console.warn('主进程尝试保存剪贴板，但 AuthToken 未设置。将数据加入待保存队列。');
+          
+          // 加入队列
+          pendingSaveQueue.push({ type, content, timestamp: Date.now() });
+          
+          // 尝试请求 Token
+          if (mainWindow && !mainWindow.isDestroyed()) {
+              console.log('主进程向渲染进程请求 Token...');
+              mainWindow.webContents.send('request-token');
+          }
+          return false;
+      }
+    } else {
+      // 内存模式：直接入队并请求渲染进程提供 Token
+      console.warn('主进程尝试保存剪贴板，但 AuthToken 未设置（内存模式）。将数据加入待保存队列。');
+      pendingSaveQueue.push({ type, content, timestamp: Date.now() });
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        console.log('主进程向渲染进程请求 Token（内存模式）...');
+        mainWindow.webContents.send('request-token');
+      }
+      return false;
+    }
+  }
+  
+  try {
+    if (type === 'text') {
+      const preview = (content || '').replace(/\s+/g, ' ').slice(0, 80);
+      console.log('主进程正在保存文本内容...', {
+        length: (content || '').length,
+        preview
+      });
+    } else if (type === 'image') {
+      console.log('主进程正在保存图片内容...', {
+        dataUrlLength: (content || '').length
+      });
+    } else {
+      console.log(`主进程正在保存 ${type} 类型剪贴板内容...`);
+    }
+    const response = await fetch(`${apiBaseUrl}/clips`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+      },
+      body: JSON.stringify({
+        type,
+        content,
+        metadata: {
+          source: 'desktop_main_process',
+          auto_detected: true,
+          timestamp: new Date().toISOString()
+        }
+      })
+    });
+    
+    if (response.ok) {
+      console.log('主进程 API 保存成功');
+      return true;
+    } else {
+      console.error('主进程 API 保存失败:', response.status);
+      return false;
+    }
+  } catch (err) {
+    console.error('主进程 API 请求错误:', err);
+    return false;
+  }
+}
+
+function startClipboardMonitoring(window) {
+  if (clipboardMonitorInterval) {
+    clearInterval(clipboardMonitorInterval);
+  }
+
+  // 初始化当前剪贴板内容，避免启动时重复发送
+  lastClipboardText = clipboard.readText();
+  const img = clipboard.readImage();
+  if (!img.isEmpty()) {
+    lastClipboardImage = img.toDataURL();
+  }
+
+  // 启动监控时打印一次上下文
+  try {
+    const previewText = (lastClipboardText || '').replace(/\s+/g, ' ').slice(0, 80);
+    const imgSize = img && !img.isEmpty() ? img.getSize() : { width: 0, height: 0 };
+    console.log(
+      '启动主进程剪贴板监控...',
+      {
+        windowVisible: !!window && !window.isDestroyed() ? window.isVisible() : false,
+        windowFocused: !!window && !window.isDestroyed() ? window.isFocused() : false,
+        initialTextLength: (lastClipboardText || '').length,
+        initialTextPreview: previewText,
+        initialImageLength: (lastClipboardImage || '').length,
+        initialImageSize: imgSize,
+      }
+    );
+  } catch (e) {
+    console.warn('启动监控时记录上下文失败:', e);
+  }
+
+  clipboardMonitorInterval = setInterval(() => {
+    if (!window || window.isDestroyed()) return;
+
+    // 1. 检查文本
+    const text = clipboard.readText();
+    if (text && text !== lastClipboardText) {
+      lastClipboardText = text;
+      // 清除图片记录，因为剪贴板内容已变为文本
+      lastClipboardImage = ''; 
+      
+      const preview = text.replace(/\s+/g, ' ').slice(0, 120);
+      try {
+        console.log('检测到剪贴板文本变化 (后台监控)', {
+          length: text.length,
+          preview,
+          windowVisible: !!window && !window.isDestroyed() ? window.isVisible() : false,
+          windowFocused: !!window && !window.isDestroyed() ? window.isFocused() : false,
+        });
+      } catch (_) {}
+      
+      // 尝试直接保存
+      saveClipItemToApi('text', text).then(saved => {
+        if (!window || window.isDestroyed()) return;
+        console.log('准备发送 IPC 到渲染进程: clipboard-changed(text)', {
+          savedByMain: saved,
+          contentLength: text.length
+        });
+        window.webContents.send('clipboard-changed', {
+          type: 'text',
+          content: text,
+          timestamp: Date.now(),
+          savedByMain: saved
+        });
+      });
+      
+      return;
+    }
+
+    // 2. 检查图片 (仅当没有文本时，或明确需要支持混合内容时)
+    // 通常剪贴板要么是文本要么是图片
+    // 读取图片比较耗资源，这里做一个简单的优化：如果文本没变且为空，或者文本没变但我们之前是图片，则检查图片
+    
+    // 简单的策略：总是检查图片，但为了性能，可以限制频率或只在文本为空时检查？
+    // 为了完整性，我们检查图片。
+    // 注意：clipboard.readImage() 在某些平台上可能比较慢
+    
+    const image = clipboard.readImage();
+    if (!image.isEmpty()) {
+      const imageDataUrl = image.toDataURL();
+      if (imageDataUrl !== lastClipboardImage) {
+        lastClipboardImage = imageDataUrl;
+        // 清除文本记录
+        lastClipboardText = '';
+        
+        try {
+          const size = image.getSize();
+          console.log('检测到剪贴板图片变化 (后台监控)', {
+            dataUrlLength: imageDataUrl.length,
+            width: size.width,
+            height: size.height,
+            windowVisible: !!window && !window.isDestroyed() ? window.isVisible() : false,
+            windowFocused: !!window && !window.isDestroyed() ? window.isFocused() : false,
+          });
+        } catch (_) {}
+        
+        // 尝试直接保存
+        saveClipItemToApi('image', imageDataUrl).then(saved => {
+          if (!window || window.isDestroyed()) return;
+          console.log('准备发送 IPC 到渲染进程: clipboard-changed(image)', {
+            savedByMain: saved,
+            dataUrlLength: imageDataUrl.length
+          });
+          window.webContents.send('clipboard-changed', {
+            type: 'image',
+            content: imageDataUrl,
+            timestamp: Date.now(),
+            savedByMain: saved
+          });
+        });
+      }
+    }
+  }, 1000); // 每秒检查一次
+}
+
 function createWindow() {
   // 创建浏览器窗口 - 设计为紧凑的长条形剪贴板工具
   mainWindow = new BrowserWindow({
@@ -190,7 +468,9 @@ function createWindow() {
       enableRemoteModule: false,
       preload: path.join(__dirname, 'preload.cjs'),
       webSecurity: true,
-      allowRunningInsecureContent: false
+      allowRunningInsecureContent: false,
+      // 性能优化：禁用后台节流，确保剪贴板监控在窗口隐藏时也能正常工作
+      backgroundThrottling: false
     },
     icon: getWindowIcon(),
     show: false,
@@ -213,8 +493,6 @@ function createWindow() {
     transparent: false,
     alwaysOnTop: false,
     skipTaskbar: false,
-    // 性能优化
-    backgroundThrottling: false,
     // Windows 特定设置
     ...(process.platform === 'win32' && !isDev && {
       // Windows 无框窗口的额外设置在 titleBarOverlay 中已定义
@@ -243,7 +521,42 @@ function createWindow() {
     if (isDev) {
       mainWindow.focus();
     }
+
+    // 向渲染进程请求当前服务器配置，确保主进程握手后持有最新 API 地址
+    try {
+      mainWindow.webContents.send('request-server-config');
+    } catch (e) {
+      console.warn('请求服务器配置失败:', e);
+    }
+
+    // 内存模式下，主动请求渲染进程提供 Token
+    if (TOKEN_STORAGE_MODE === 'memory') {
+      try {
+        mainWindow.webContents.send('request-token');
+      } catch (e) {
+        console.warn('请求 Token 失败:', e);
+      }
+    }
+
+    // 启动剪贴板监控
+    startClipboardMonitoring(mainWindow);
   });
+
+  // 监听窗口显示/隐藏事件，控制 Dock 图标 (仅 macOS)
+  if (process.platform === 'darwin') {
+    mainWindow.on('show', () => {
+      app.dock.show().then(() => {
+        // 再次设置 Dock 图标，防止变回默认图标
+        const iconPath = getWindowIcon();
+        app.dock.setIcon(iconPath);
+        console.log('恢复窗口显示，重设 Dock 图标:', iconPath);
+      }).catch(err => console.error('Failed to show dock icon:', err));
+    });
+    
+    mainWindow.on('hide', () => {
+      app.dock.hide();
+    });
+  }
 
   // 监听窗口状态变化
   mainWindow.on('maximize', () => {
@@ -350,9 +663,16 @@ function createTray() {
         // 根据平台和文件类型调整图标
         if (process.platform === 'darwin') {
           // macOS: 使用原始尺寸，系统会自动缩放，Template 图标自动适配主题
-          if (iconPath.includes('Template')) {
-            img.setTemplateImage(true);
-            trayIcon = img;
+          if (iconPath.match(/template/i)) {
+            // 如果是 SVG，不要强制 resize，这可能会导致模糊或丢失矢量特性
+            // 只有当图片尺寸确实过大时才 resize
+            const size = img.getSize();
+            if (size.width > 24 || size.height > 24) {
+              trayIcon = img.resize({ width: 16, height: 16 });
+            } else {
+              trayIcon = img;
+            }
+            trayIcon.setTemplateImage(true);
             console.log('✅ 成功加载 macOS Template 托盘图标:', iconPath);
           } else {
             trayIcon = img.resize({ width: 16, height: 16 });
@@ -491,6 +811,67 @@ function createTray() {
 
 // 当Electron完成初始化并准备创建浏览器窗口时调用此方法
 app.whenReady().then(() => {
+  // 仅在磁盘模式下尝试从磁盘加载 Token
+  if (TOKEN_STORAGE_MODE === 'disk') {
+    const diskToken = loadTokenFromDisk();
+    if (diskToken) {
+        authToken = diskToken;
+        console.log('应用启动：已从磁盘恢复 Token');
+        if (pendingSaveQueue.length > 0) {
+          flushPendingQueue();
+        }
+    }
+  } else {
+    console.log('应用启动：Token 内存模式，启动后不从磁盘加载');
+  }
+
+  // 显式设置 Dock 图标（macOS）
+  if (process.platform === 'darwin') {
+    const iconPath = getWindowIcon();
+    app.dock.setIcon(iconPath);
+    console.log('设置 Dock 图标:', iconPath);
+  }
+  
+  // 监听渲染进程日志
+  ipcMain.on('renderer-log', (event, message, data) => {
+    if (data) {
+      console.log(`[Renderer] ${message}`, data);
+    } else {
+      console.log(`[Renderer] ${message}`);
+    }
+  });
+
+  // 监听 Token 同步
+  ipcMain.on('sync-token', (event, token) => {
+    authToken = token;
+    if (TOKEN_STORAGE_MODE === 'disk') {
+      saveTokenToDisk(token); // 保存到磁盘
+      console.log('主进程已更新 Token 并保存到磁盘');
+    } else {
+      console.log('主进程已更新 Token（内存模式，不写入磁盘）');
+    }
+    
+    flushPendingQueue();
+  });
+
+  // 监听服务器配置同步（例如 API 基地址）
+  ipcMain.on('sync-server-config', (event, config) => {
+    try {
+      if (config && typeof config.apiBaseUrl === 'string' && config.apiBaseUrl.trim().length > 0) {
+        apiBaseUrl = config.apiBaseUrl.trim();
+        console.log('主进程已更新 API 基地址:', apiBaseUrl);
+      } else if (config && typeof config.baseUrl === 'string') {
+        // 兼容仅传递 baseUrl 的情况
+        apiBaseUrl = `${config.baseUrl.replace(/\/$/, '')}/api/v1`;
+        console.log('主进程已根据 baseUrl 更新 API 基地址:', apiBaseUrl);
+      } else {
+        console.warn('sync-server-config 收到的配置无效:', config);
+      }
+    } catch (err) {
+      console.error('同步服务器配置失败:', err);
+    }
+  });
+
   createWindow();
   createTray();
 
@@ -499,6 +880,8 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
+    } else if (mainWindow && !mainWindow.isVisible()) {
+      mainWindow.show();
     }
   });
 
