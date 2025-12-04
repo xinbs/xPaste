@@ -473,7 +473,7 @@ function createWindow() {
       backgroundThrottling: false
     },
     icon: getWindowIcon(),
-    show: false,
+    show: true,
     // 根据环境模式设置窗口样式
     frame: isDev,  // 只在开发模式显示完整框架
     titleBarStyle: process.platform === 'darwin' 
@@ -513,7 +513,19 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, 'frontend', 'dist', 'index.html'));
   }
 
-  // 窗口准备好后显示
+  // 渲染流程事件监控，便于定位生产环境空白窗口问题
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('[main] did-finish-load 渲染完成');
+  });
+
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    console.error('[main] did-fail-load 加载失败', { errorCode, errorDescription, validatedURL, isMainFrame });
+    try {
+      dialog.showErrorBox('页面加载失败', `${errorDescription} (code: ${errorCode})\nURL: ${validatedURL || 'file://index.html'}`);
+    } catch (_) {}
+  });
+
+  // 窗口准备好后显示（show:true 已提前显示，这里保证绘制完成后聚焦）
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     
