@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, RotateCcw, Download, Upload, AlertCircle, CheckCircle, X, Server, Wifi, LogIn } from 'lucide-react';
+import { Settings as SettingsIcon, Save, RotateCcw, Download, Upload, AlertCircle, CheckCircle, X, Server, Wifi, LogIn, Keyboard } from 'lucide-react';
 import { useSettingsStore, SETTING_KEYS, SETTING_GROUPS } from '../store/settings';
 import { useAuthStore } from '../store/auth';
 import { useConfigStore } from '../store/config';
@@ -14,21 +14,21 @@ interface SettingItemProps {
 }
 
 const SettingItem: React.FC<SettingItemProps> = ({ title, description, children, error }) => (
-  <div className="py-2.5 border-b border-gray-200 last:border-b-0">
-    <div className="flex items-start justify-between setting-item">
-      <div className="flex-1 min-w-0 mr-3">
-        <h4 className="text-xs font-medium text-gray-900">{title}</h4>
+  <div className="py-3 border-b border-gray-200 last:border-b-0">
+        <div className="flex flex-col md:flex-row md:flex-wrap md:items-start md:justify-between gap-4 setting-item">
+      <div className="flex-1 min-w-[160px] md:mr-4">
+        <h4 className="text-sm font-medium text-gray-900">{title}</h4>
         {description && (
-          <p className="mt-0.5 text-xs text-gray-500">{description}</p>
+          <p className="mt-1 text-xs text-gray-500 leading-normal">{description}</p>
         )}
         {error && (
-          <p className="mt-0.5 text-xs text-red-600 flex items-center">
+          <p className="mt-1 text-xs text-red-600 flex items-center">
             <AlertCircle className="w-3 h-3 mr-1" />
             {error}
           </p>
         )}
       </div>
-      <div className="flex-shrink-0">
+          <div className="w-full md:w-auto shrink min-w-0 max-w-full">
         {children}
       </div>
     </div>
@@ -171,6 +171,120 @@ export const Settings: React.FC = () => {
   const [serverUrl, setServerUrl] = useState('');
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const defaultHotkey = 'CmdOrCtrl+Shift+V';
+  // 兼容后端将 JSON 以字符串返回的情况
+  const safeParseJson = (val: any, fallback: any) => {
+    if (typeof val === 'string') {
+      const trimmed = val.trim();
+      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try { return JSON.parse(trimmed); } catch { return fallback; }
+      }
+      return fallback;
+    }
+    return val ?? fallback;
+  };
+
+  // 解析形如 Go 的 map 字符串: map[key:value key2:value2]
+  const parseGoMapString = (str: string): Record<string, string> => {
+    if (typeof str !== 'string') return {};
+    const m = str.match(/^map\[(.*)\]$/);
+    if (!m) return {};
+    const body = m[1];
+    const result: Record<string, string> = {};
+    body.split(/\s+/).forEach((pair) => {
+      const idx = pair.indexOf(':');
+      if (idx > 0) {
+        const key = pair.slice(0, idx);
+        const value = pair.slice(idx + 1);
+        if (key) result[key] = value;
+      }
+    });
+    return result;
+  };
+
+  const isValidHotkey = (val: any): val is string => {
+    return (
+      typeof val === 'string' &&
+      !val.startsWith('map[') &&
+      val.trim().length > 0 &&
+      /[A-Za-z0-9]/.test(val)
+    );
+  };
+
+  const initialHotkeysRaw = typeof getSetting === 'function' ? getSetting(SETTING_KEYS.USER_HOTKEYS, {}) : undefined;
+  const initialHotkeysObj = safeParseJson(initialHotkeysRaw, {});
+  const initialGoMap = typeof initialHotkeysRaw === 'string' ? parseGoMapString(initialHotkeysRaw) : {};
+  const initialCandidate = initialHotkeysObj?.show_window || initialGoMap?.show_window || initialHotkeysRaw;
+  const initialShowKey = isValidHotkey(initialCandidate) ? initialCandidate : defaultHotkey;
+  const [hotkeyShowWindow, setHotkeyShowWindow] = useState<string>(initialShowKey);
+  const [isRecordingHotkey, setIsRecordingHotkey] = useState<boolean>(false);
+
+  // 监听键盘以录制快捷键
+  useEffect(() => {
+    if (!isRecordingHotkey) return;
+
+    const normalizeKey = (e) => {
+      const k = e.key;
+      const specialMap = {
+        Escape: 'Escape', Enter: 'Enter', Backspace: 'Backspace', Delete: 'Delete',
+        Tab: 'Tab', Space: 'Space', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right'
+      };
+      if (specialMap[k]) return specialMap[k];
+      if (/^F\d{1,2}$/.test(k)) return k; // F1-F12
+      if (k.length === 1) return k.toUpperCase();
+      // For non-character keys like 'Home', 'End'
+      return k;
+    };
+
+    const handler = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // 按 ESC 取消录制
+      if (e.key === 'Escape') {
+        setIsRecordingHotkey(false);
+        return;
+      }
+
+      const key = normalizeKey(e);
+      const isModifierOnly = ['Shift', 'Alt', 'Control', 'Meta'].includes(key);
+
+      const parts = [];
+      if (e.ctrlKey || e.metaKey) parts.push('CmdOrCtrl');
+      if (e.shiftKey) parts.push('Shift');
+      if (e.altKey) parts.push('Alt');
+
+      // 仅按修饰键时，不结束录制，等待主键输入
+      if (isModifierOnly) {
+        return;
+      }
+
+      if (key) parts.push(key);
+      const accel = parts.join('+');
+      if (accel) setHotkeyShowWindow(accel);
+      setIsRecordingHotkey(false);
+    };
+
+    window.addEventListener('keydown', handler, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', handler, { capture: true });
+    };
+  }, [isRecordingHotkey]);
+
+  // 当设置变化时，更新本地快捷键显示，并仅在有效时同步到主进程
+  useEffect(() => {
+    try {
+      const hotkeysRaw = getSetting(SETTING_KEYS.USER_HOTKEYS, {});
+      const hotkeys = safeParseJson(hotkeysRaw, {});
+      const goMap = typeof hotkeysRaw === 'string' ? parseGoMapString(hotkeysRaw) : {};
+      const candidate = hotkeys?.show_window || goMap?.show_window || hotkeysRaw;
+      const showKey = isValidHotkey(candidate) ? candidate : defaultHotkey;
+      setHotkeyShowWindow(showKey);
+      if (isValidHotkey(showKey) && window.electronAPI && typeof window.electronAPI.syncHotkeys === 'function') {
+        window.electronAPI.syncHotkeys({ show_window: showKey });
+      }
+    } catch (_) {}
+  }, [settings]);
 
   // 组件挂载时获取设置
   useEffect(() => {
@@ -338,6 +452,71 @@ export const Settings: React.FC = () => {
           disabled={isLoading}
         />
       </SettingItem>
+
+      <SettingItem
+        title="呼出主程序快捷键"
+        description="记录并保存用于显示主窗口的全局快捷键"
+      >
+        <div className="flex flex-wrap items-center gap-2 w-full">
+          <div className="flex items-center px-3 py-2 bg-gray-50 border border-gray-200 rounded-md text-sm text-gray-800 w-full sm:w-auto sm:flex-1 sm:min-w-[140px]">
+            <Keyboard className="w-4 h-4 mr-2 text-gray-600 flex-shrink-0" />
+            <span className="truncate">{hotkeyShowWindow}</span>
+            {isRecordingHotkey && (
+              <span className="ml-2 text-xs text-blue-600 whitespace-nowrap">正在记录...</span>
+            )}
+          </div>
+          <div className="grid grid-cols-4 sm:flex sm:flex-wrap gap-2 w-full sm:w-auto">
+            <button
+              onClick={() => setIsRecordingHotkey(true)}
+              disabled={isLoading || isRecordingHotkey}
+              className={cn('col-span-1 inline-flex items-center px-3 py-2 text-sm rounded-md justify-center whitespace-nowrap flex-1 sm:flex-none',
+                isRecordingHotkey ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'
+              )}
+            >
+              记录
+            </button>
+            <button
+              onClick={() => setHotkeyShowWindow(defaultHotkey)}
+              disabled={isLoading}
+              className={cn('col-span-1 inline-flex items-center px-3 py-2 text-sm rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200 justify-center whitespace-nowrap flex-1 sm:flex-none')}
+            >
+              恢复默认
+            </button>
+            <button
+              onClick={async () => {
+                setSaveStatus('saving');
+                try {
+                  if (isAuthenticated) {
+                    await setSetting(SETTING_KEYS.USER_HOTKEYS, { show_window: hotkeyShowWindow });
+                  }
+                  if (window.electronAPI && window.electronAPI.syncHotkeys) {
+                    await window.electronAPI.syncHotkeys({ show_window: hotkeyShowWindow });
+                  }
+                  setSaveStatus('saved');
+                  setTimeout(() => setSaveStatus('idle'), 2000);
+                } catch (err) {
+                  console.error('保存快捷键失败:', err);
+                  setSaveStatus('error');
+                  setTimeout(() => setSaveStatus('idle'), 3000);
+                }
+              }}
+              disabled={isLoading || saveStatus === 'saving'}
+              className={cn('col-span-1 inline-flex items-center px-3 py-2 text-sm rounded-md justify-center whitespace-nowrap flex-1 sm:flex-none',
+                saveStatus === 'saving' ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-green-600 text-white hover:bg-green-700'
+              )}
+            >
+              <Save className="w-4 h-4 mr-2" />
+              保存
+            </button>
+            <button
+              onClick={() => window.electronAPI?.showMainWindow?.()}
+              className={cn('col-span-1 inline-flex items-center px-3 py-2 text-sm rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200 justify-center whitespace-nowrap flex-1 sm:flex-none')}
+            >
+              测试
+            </button>
+          </div>
+        </div>
+      </SettingItem>
       
       {getSetting(SETTING_KEYS.USER_AUTO_CLEANUP, false) && (
         <SettingItem
@@ -436,20 +615,20 @@ export const Settings: React.FC = () => {
           description="设置同步服务器的地址，例如: http://localhost:8080"
           error={connectionError || undefined}
         >
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-col sm:flex-row items-center gap-2">
             <input
               type="url"
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
               placeholder="http://localhost:8080"
-              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+              className="block w-full sm:flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
               disabled={isLoading || connectionStatus === 'testing'}
             />
             <button
               onClick={testServerConnection}
               disabled={isLoading || connectionStatus === 'testing' || !serverUrl.trim()}
               className={cn(
-                'inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50',
+                'inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 w-full sm:w-auto justify-center',
                 connectionStatus === 'success'
                   ? 'text-green-700 bg-green-100 hover:bg-green-200'
                   : connectionStatus === 'error'
@@ -494,7 +673,7 @@ export const Settings: React.FC = () => {
                 }}
                 disabled={saveStatus === 'saving' || serverUrl === serverConfig.baseUrl}
                 className={cn(
-                  'inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50',
+                  'inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 w-full sm:w-auto justify-center',
                   saveStatus === 'saving' || serverUrl === serverConfig.baseUrl
                     ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                     : 'bg-green-600 text-white hover:bg-green-700'
