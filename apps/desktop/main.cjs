@@ -56,6 +56,7 @@ function loadTokenFromDisk() {
 function getWindowIcon() {
   const platform = process.platform;
   const assetsDir = path.join(__dirname, 'assets');
+  const resourcesDir = process.resourcesPath || path.dirname(app.getPath('exe'));
   
   // Windows: 优先使用 ICO，备用 PNG
   if (platform === 'win32') {
@@ -76,6 +77,9 @@ function getWindowIcon() {
   // macOS: 优先使用 ICNS，备用 PNG/SVG
   else if (platform === 'darwin') {
     const macPaths = [
+      // 打包后的正确位置：Resources 下的 icns
+      path.join(resourcesDir, 'icon.icns'),
+      // 开发/备用：assets 内的 icns/png/svg
       path.join(assetsDir, 'icon.icns'),
       path.join(assetsDir, 'icon.png'),
       path.join(assetsDir, 'icon.svg')
@@ -109,6 +113,8 @@ function getWindowIcon() {
   console.log('使用备用图标:', fallback);
   return fallback;
 }
+
+// （已移除未使用的图片加载辅助方法）
 
 // 跨平台托盘图标获取函数
 function getTrayIconPaths() {
@@ -510,7 +516,8 @@ function createWindow() {
     // 开发模式下打开开发者工具
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, 'frontend', 'dist', 'index.html'));
+    const indexPath = path.join(__dirname, 'frontend', 'dist', 'index.html');
+    mainWindow.loadFile(indexPath);
   }
 
   // 渲染流程事件监控，便于定位生产环境空白窗口问题
@@ -560,7 +567,16 @@ function createWindow() {
       app.dock.show().then(() => {
         // 再次设置 Dock 图标，防止变回默认图标
         const iconPath = getWindowIcon();
-        app.dock.setIcon(iconPath);
+        try {
+          const img = nativeImage.createFromPath(iconPath);
+          if (img && !img.isEmpty()) {
+            app.dock.setIcon(img);
+          } else {
+            console.warn('Dock 图标加载为空，路径:', iconPath);
+          }
+        } catch (e) {
+          console.warn('重设 Dock 图标失败:', iconPath, e?.message || e);
+        }
         console.log('恢复窗口显示，重设 Dock 图标:', iconPath);
       }).catch(err => console.error('Failed to show dock icon:', err));
     });
@@ -860,7 +876,16 @@ app.whenReady().then(() => {
   // 显式设置 Dock 图标（macOS）
   if (process.platform === 'darwin') {
     const iconPath = getWindowIcon();
-    app.dock.setIcon(iconPath);
+    try {
+      const img = nativeImage.createFromPath(iconPath);
+      if (img && !img.isEmpty()) {
+        app.dock.setIcon(img);
+      } else {
+        console.warn('初始 Dock 图标加载为空，路径:', iconPath);
+      }
+    } catch (e) {
+      console.warn('设置 Dock 图标失败:', iconPath, e?.message || e);
+    }
     console.log('设置 Dock 图标:', iconPath);
   }
   

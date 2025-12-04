@@ -42,3 +42,4 @@ services/sync-api/data/xpaste.db-*
 # Log files
 services/sync-api/logs/*
 *.log
+apps/desktop/dist-electron/*
