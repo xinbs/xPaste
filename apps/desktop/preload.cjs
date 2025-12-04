@@ -23,6 +23,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 打开设置窗口
   openSettingsWindow: () => ipcRenderer.invoke('open-settings-window'),
   
+  // 显示主窗口
+  showMainWindow: () => ipcRenderer.invoke('show-main-window'),
+  
   // 窗口控制
   minimizeWindow: () => ipcRenderer.invoke('minimize-window'),
   maximizeWindow: () => ipcRenderer.invoke('maximize-window'),
@@ -64,4 +67,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('request-server-config');
     ipcRenderer.on('request-server-config', callback);
   },
+  
+  // 同步用户快捷键到主进程（注册全局快捷键）
+  syncHotkeys: (hotkeys) => ipcRenderer.invoke('update-hotkeys', hotkeys),
 });

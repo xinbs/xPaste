@@ -5,6 +5,7 @@ export interface ElectronAPI {
   showSaveDialog: (options: any) => Promise<any>;
   showOpenDialog: (options: any) => Promise<any>;
   openSettingsWindow: () => Promise<void>;
+  showMainWindow: () => Promise<{ success: boolean; error?: string }>;
   
   // 窗口控制
   minimizeWindow: () => Promise<void>;
@@ -38,6 +39,9 @@ export interface ElectronAPI {
   // 服务器配置同步
   syncServerConfig: (config: { apiBaseUrl?: string; baseUrl?: string }) => void;
   onRequestServerConfig: (callback: () => void) => void;
+
+  // 快捷键同步
+  syncHotkeys: (hotkeys: { show_window?: string }) => Promise<{ success: boolean; error?: string }>;
 }
 
 declare global {

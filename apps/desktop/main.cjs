@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, shell, ipcMain, dialog, Tray, nativeImage, clipboard } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain, dialog, Tray, nativeImage, clipboard, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -221,8 +221,8 @@ function createFallbackTrayIcon() {
 
 // 保持对窗口对象的全局引用，如果不这样做，当JavaScript对象被垃圾回收时，窗口将自动关闭
 let mainWindow;
-let settingsWindow;
 let tray;
+let currentHotkeys = { show_window: '' };
 
 // 剪贴板监控相关变量
 let clipboardMonitorInterval;
@@ -599,42 +599,54 @@ function createWindow() {
   });
 }
 
-function createSettingsWindow() {
-  // 如果设置窗口已经存在，则聚焦到该窗口
-  if (settingsWindow) {
-    settingsWindow.focus();
-    return;
-  }
+// 统一使用主界面设置标签，无需独立设置窗口
 
-  settingsWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
-    },
-    parent: mainWindow,
-    modal: false,
-    show: false,
-    title: 'xPaste 设置'
-  });
-
-  // 使用独立的设置窗口HTML文件，避免与主窗口强耦合
-  const settingsUrl = `file://${path.join(__dirname, 'settings.html')}`;
-  
-  settingsWindow.loadURL(settingsUrl);
-
-  settingsWindow.once('ready-to-show', () => {
-    settingsWindow.show();
-    if (isDev) {
-      settingsWindow.webContents.openDevTools();
+// 显示并聚焦主窗口
+function showMainWindow() {
+  try {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      createWindow();
     }
-  });
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.show();
+    mainWindow.focus();
+  } catch (err) {
+    console.warn('显示主窗口失败:', err);
+  }
+}
 
-  settingsWindow.on('closed', () => {
-    settingsWindow = null;
-  });
+// 注册“呼出主程序”快捷键
+function registerShowWindowHotkey(accelerator) {
+  try {
+    if (!accelerator || typeof accelerator !== 'string') {
+      console.warn('无效的快捷键加速字符串:', accelerator);
+      return { success: false, error: '无效的快捷键' };
+    }
+
+    // 取消之前的注册
+    if (currentHotkeys.show_window) {
+      try { globalShortcut.unregister(currentHotkeys.show_window); } catch (_) {}
+    }
+
+    // 注册新的快捷键
+    const ok = globalShortcut.register(accelerator, () => {
+      showMainWindow();
+    });
+
+    if (!ok) {
+      console.error('注册快捷键失败:', accelerator);
+      return { success: false, error: '注册失败，快捷键可能被系统占用或无效' };
+    }
+
+    currentHotkeys.show_window = accelerator;
+    console.log('已注册呼出主程序快捷键:', accelerator);
+    return { success: true };
+  } catch (err) {
+    console.error('注册快捷键异常:', err);
+    return { success: false, error: err?.message || '未知错误' };
+  }
 }
 
 // 创建系统托盘
@@ -746,7 +758,15 @@ function createTray() {
     {
       label: '打开设置',
       click: () => {
-        createSettingsWindow();
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) {
+            mainWindow.restore();
+          }
+          mainWindow.show();
+          mainWindow.focus();
+          // 切换到设置标签页
+          mainWindow.webContents.send('switch-to-tab', 'settings');
+        }
       }
     },
     {
@@ -875,6 +895,10 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
 
+  // 注册默认快捷键，用户可在设置页更改
+  const defaultAccelerator = (process.platform === 'darwin') ? 'CmdOrCtrl+Shift+V' : 'Ctrl+Shift+V';
+  registerShowWindowHotkey(defaultAccelerator);
+
   // 在macOS上，当点击dock图标并且没有其他窗口打开时，
   // 通常在应用程序中重新创建一个窗口。
   app.on('activate', () => {
@@ -922,7 +946,15 @@ function createMenu() {
           label: '设置',
           accelerator: 'CmdOrCtrl+,',
           click: () => {
-            createSettingsWindow();
+            if (mainWindow) {
+              if (mainWindow.isMinimized()) {
+                mainWindow.restore();
+              }
+              mainWindow.show();
+              mainWindow.focus();
+              // 切换到设置标签页
+              mainWindow.webContents.send('switch-to-tab', 'settings');
+            }
           }
         },
         { type: 'separator' },
@@ -1078,7 +1110,34 @@ ipcMain.handle('show-open-dialog', async (event, options) => {
 });
 
 ipcMain.handle('open-settings-window', () => {
-  createSettingsWindow();
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.show();
+    mainWindow.focus();
+    // 切换到设置标签页
+    mainWindow.webContents.send('switch-to-tab', 'settings');
+  }
+});
+
+// 快捷键相关 IPC
+ipcMain.handle('update-hotkeys', (event, hotkeys) => {
+  try {
+    const accelerator = hotkeys?.show_window;
+    return registerShowWindowHotkey(accelerator);
+  } catch (err) {
+    return { success: false, error: err?.message || '更新快捷键失败' };
+  }
+});
+
+ipcMain.handle('show-main-window', () => {
+  try {
+    showMainWindow();
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message || '显示主窗口失败' };
+  }
 });
 
 // 窗口控制 IPC 处理器
@@ -1166,3 +1225,13 @@ if (!gotTheLock) {
     }
   });
 }
+
+// 退出前注销所有快捷键
+app.on('will-quit', () => {
+  try {
+    globalShortcut.unregisterAll();
+    console.log('已注销所有全局快捷键');
+  } catch (err) {
+    console.warn('注销快捷键时出现问题:', err);
+  }
+});
