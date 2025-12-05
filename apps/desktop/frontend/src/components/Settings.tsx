@@ -286,6 +286,16 @@ export const Settings: React.FC = () => {
     } catch (_) {}
   }, [settings]);
 
+  // 同步“关闭按钮行为”到主进程（随设置变化）
+  useEffect(() => {
+    try {
+      const action = getSetting(SETTING_KEYS.USER_CLOSE_BEHAVIOR, 'minimize');
+      if (window.electronAPI && (window.electronAPI as any).syncCloseBehavior) {
+        (window.electronAPI as any).syncCloseBehavior({ close_action: action });
+      }
+    } catch (_) {}
+  }, [settings]);
+
   // 组件挂载时获取设置
   useEffect(() => {
     // 使用配置存储中的服务器地址
@@ -427,7 +437,32 @@ export const Settings: React.FC = () => {
           disabled={isLoading}
         />
       </SettingItem>
-      
+
+      <SettingItem
+        title="关闭按钮行为"
+        description="选择点击关闭时的应用行为"
+      >
+        <Select
+          value={getSetting(SETTING_KEYS.USER_CLOSE_BEHAVIOR, 'minimize')}
+          onChange={async (value) => {
+            await handleSave(SETTING_KEYS.USER_CLOSE_BEHAVIOR, value);
+            try {
+              if (window.electronAPI && (window.electronAPI as any).syncCloseBehavior) {
+                await (window.electronAPI as any).syncCloseBehavior({ close_action: value });
+              }
+            } catch (e) {
+              console.warn('同步关闭行为到主进程失败:', e);
+            }
+          }}
+          options={[
+            { value: 'minimize', label: '最小化并隐藏 Dock' },
+            { value: 'hide', label: '隐藏窗口(保留 Dock)' },
+            { value: 'quit', label: '直接退出应用' }
+          ]}
+          disabled={isLoading}
+        />
+      </SettingItem>
+
       <SettingItem
         title="最大历史记录"
         description="设置保存的剪贴板历史记录数量"

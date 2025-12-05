@@ -70,4 +70,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // 同步用户快捷键到主进程（注册全局快捷键）
   syncHotkeys: (hotkeys) => ipcRenderer.invoke('update-hotkeys', hotkeys),
+  // 同步关闭行为到主进程
+  syncCloseBehavior: (behavior) => ipcRenderer.invoke('update-close-behavior', behavior),
 });

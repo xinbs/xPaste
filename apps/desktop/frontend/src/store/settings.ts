@@ -18,6 +18,8 @@ export const SETTING_KEYS = {
   USER_HOTKEYS: 'user.hotkeys',
   USER_AUTO_CLEANUP: 'user.auto_cleanup',
   USER_CLEANUP_PERIOD: 'user.cleanup_period',
+  // 窗口行为设置
+  USER_CLOSE_BEHAVIOR: 'user.close_behavior',
   // 服务器设置
   SERVER_URL: 'server.url',
 } as const;

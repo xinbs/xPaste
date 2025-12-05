@@ -3,6 +3,8 @@ const path = require('path');
 const fs = require('fs');
 
 const isDev = process.env.NODE_ENV === 'development';
+// 关闭按钮行为：'minimize' | 'hide' | 'quit'
+let userCloseBehavior = 'minimize';
 // Token 存储模式：默认磁盘，可通过环境变量切换为内存
 // 可选值：'disk' | 'memory'
 const TOKEN_STORAGE_MODE = (process.env.TOKEN_STORAGE || 'disk').toLowerCase();
@@ -582,7 +584,10 @@ function createWindow() {
     });
     
     mainWindow.on('hide', () => {
-      app.dock.hide();
+      // 当按“隐藏窗口(保留 Dock)”时，不隐藏 Dock
+      if (userCloseBehavior !== 'hide') {
+        app.dock.hide();
+      }
     });
   }
 
@@ -595,20 +600,47 @@ function createWindow() {
     mainWindow.webContents.send('window-unmaximized');
   });
 
+  // 最小化时按需隐藏 Dock（macOS）
+  mainWindow.on('minimize', () => {
+    if (process.platform === 'darwin' && userCloseBehavior === 'minimize') {
+      app.dock.hide();
+    }
+  });
+
   // 窗口关闭时隐藏到托盘而不是退出
   mainWindow.on('close', (event) => {
-    if (!app.isQuiting) {
-      event.preventDefault();
+    if (app.isQuiting) {
+      return;
+    }
+
+    // 根据用户配置执行不同的行为
+    if (userCloseBehavior === 'quit') {
+      // 允许默认关闭行为，退出应用
+      app.isQuiting = true;
+      return;
+    }
+
+    // 拦截默认关闭
+    event.preventDefault();
+    if (userCloseBehavior === 'minimize') {
+      mainWindow.minimize();
+      if (process.platform === 'darwin') {
+        app.dock.hide();
+      }
+    } else {
+      // 默认：隐藏窗口
       mainWindow.hide();
-      
-      // 首次隐藏时显示提示
-      if (tray && !tray.isDestroyed()) {
+    }
+
+    // 显示提示气泡（仅在托盘存在时）
+    if (tray && !tray.isDestroyed()) {
+      try {
         tray.displayBalloon({
           iconType: 'info',
           title: 'xPaste',
           content: '应用已最小化到系统托盘'
         });
-      }
+      } catch (_) {}
     }
   });
 
@@ -620,10 +652,39 @@ function createWindow() {
     mainWindow = null;
   });
 
-  // 处理外部链接
+  // 处理外部链接与预览窗口
+  // 默认策略：
+  // - 允许 renderer 用 window.open('about:blank') 创建本地预览窗口（用于图片查看）
+  // - 对 http/https 链接使用外部浏览器打开并阻止新窗口
+  // - 允许 data:/blob: 这类安全的本地预览 URL
+  // - 其余协议一律阻止
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
-    return { action: 'deny' };
+    try {
+      // 允许空或 about: 开头的窗口（renderer 会写入内容用于预览）
+      if (!url || url.startsWith('about:')) {
+        return { action: 'allow' };
+      }
+
+      // 允许本地预览相关的协议
+      if (url.startsWith('data:') || url.startsWith('blob:')) {
+        return { action: 'allow' };
+      }
+
+      // 对外部 http/https 链接，改为外部打开
+      if (url.startsWith('http:') || url.startsWith('https:')) {
+        shell.openExternal(url);
+        return { action: 'deny' };
+      }
+
+      // 其他协议默认阻止
+      return { action: 'deny' };
+    } catch (err) {
+      // 对异常情况保持保守策略：只允许 about:blank，其余阻止
+      if (url === 'about:blank') {
+        return { action: 'allow' };
+      }
+      return { action: 'deny' };
+    }
   });
 }
 
@@ -635,8 +696,14 @@ function showMainWindow() {
     if (!mainWindow || mainWindow.isDestroyed()) {
       createWindow();
     }
+    // 避免 macOS 上的“还原”动画：在 macOS 不调用 restore
     if (mainWindow.isMinimized()) {
-      mainWindow.restore();
+      if (process.platform !== 'darwin') {
+        mainWindow.restore();
+      } else {
+        // 在 macOS，如果窗口处于最小化状态，先隐藏再显示，规避动画
+        try { mainWindow.hide(); } catch (_) {}
+      }
     }
     mainWindow.show();
     mainWindow.focus();
@@ -1148,8 +1215,13 @@ ipcMain.handle('show-open-dialog', async (event, options) => {
 
 ipcMain.handle('open-settings-window', () => {
   if (mainWindow) {
+    // 避免 macOS 的还原动画
     if (mainWindow.isMinimized()) {
-      mainWindow.restore();
+      if (process.platform !== 'darwin') {
+        mainWindow.restore();
+      } else {
+        try { mainWindow.hide(); } catch (_) {}
+      }
     }
     mainWindow.show();
     mainWindow.focus();
@@ -1168,6 +1240,20 @@ ipcMain.handle('update-hotkeys', (event, hotkeys) => {
   }
 });
 
+// 更新关闭行为设置
+ipcMain.handle('update-close-behavior', (event, behavior) => {
+  try {
+    const action = behavior?.close_action;
+    if (!['minimize', 'hide', 'quit'].includes(action)) {
+      throw new Error('无效的关闭行为');
+    }
+    userCloseBehavior = action;
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message || '更新关闭行为失败' };
+  }
+});
+
 ipcMain.handle('show-main-window', () => {
   try {
     showMainWindow();
@@ -1181,7 +1267,13 @@ ipcMain.handle('show-main-window', () => {
 ipcMain.handle('minimize-window', (event) => {
   const window = BrowserWindow.fromWebContents(event.sender);
   if (window) {
-    window.minimize();
+    // 在 macOS 上避免“最小化→还原”的系统动画，改为隐藏
+    if (process.platform === 'darwin') {
+      try { window.hide(); } catch (_) {}
+      try { app.dock.hide(); } catch (_) {}
+    } else {
+      window.minimize();
+    }
   }
 });
 

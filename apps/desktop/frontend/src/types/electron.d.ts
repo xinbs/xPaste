@@ -42,6 +42,8 @@ export interface ElectronAPI {
 
   // 快捷键同步
   syncHotkeys: (hotkeys: { show_window?: string }) => Promise<{ success: boolean; error?: string }>;
+  // 关闭行为同步
+  syncCloseBehavior: (behavior: { close_action: 'minimize' | 'hide' | 'quit' }) => Promise<{ success: boolean; error?: string }>;
 }
 
 declare global {
