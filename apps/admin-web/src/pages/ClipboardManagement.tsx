@@ -33,6 +33,13 @@ const ClipboardManagement: React.FC = () => {
   const [filterType, setFilterType] = useState<'all' | 'text' | 'image' | 'file'>('all')
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'deleted'>('all')
   const [searchTerm, setSearchTerm] = useState('')
+  const [tempSearchTerm, setTempSearchTerm] = useState('')
+  // 新增筛选状态
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [filterUserId, setFilterUserId] = useState('')
+  const [tempFilterUserId, setTempFilterUserId] = useState('')
+
   const [selectedItem, setSelectedItem] = useState<ClipboardItem | null>(null)
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
@@ -44,8 +51,8 @@ const ClipboardManagement: React.FC = () => {
 
   const queryClient = useQueryClient()
 
-  const { data: clipboardData, isLoading, error } = useQuery<ClipboardResponse>({
-    queryKey: ['clipboard-items', currentPage, pageSize, filterType],
+  const { data: clipboardData, isLoading, isFetching, error } = useQuery<ClipboardResponse>({
+    queryKey: ['clipboard-items', currentPage, pageSize, filterType, searchTerm, startDate, endDate, filterUserId],
     queryFn: async () => {
       const params = new URLSearchParams({
         page: currentPage.toString(),
@@ -54,10 +61,27 @@ const ClipboardManagement: React.FC = () => {
       if (filterType !== 'all') {
         params.append('type', filterType)
       }
+      if (searchTerm) {
+        params.append('search', searchTerm)
+      }
+      if (startDate) {
+        params.append('start_date', new Date(startDate).toISOString())
+      }
+      if (endDate) {
+        // 结束日期设为当天的最后一刻
+        const end = new Date(endDate)
+        end.setHours(23, 59, 59, 999)
+        params.append('end_date', end.toISOString())
+      }
+      if (filterUserId) {
+        params.append('user_id', filterUserId)
+      }
+
       const response = await api.get(`/api/v1/clipboard/?${params}`)
       return response.data
     },
-    enabled: isAuthenticated
+    enabled: isAuthenticated,
+    placeholderData: (previousData) => previousData // 保持之前的数据，避免 loading 状态导致页面闪烁
   })
 
   // 新增：按类型的全量计数，仅获取 total（使用 limit=1 减少开销）
@@ -144,6 +168,43 @@ const ClipboardManagement: React.FC = () => {
     setIsDeleteConfirmOpen(true)
   }
 
+  const handleDatePreset = (days: number) => {
+    const end = new Date()
+    const start = new Date()
+    
+    if (days === 1) {
+      // 24小时：从当前时间往前推24小时
+      start.setTime(end.getTime() - 24 * 60 * 60 * 1000)
+    } else {
+      // 天数：从今天往前推N天，时间设为0点
+      start.setDate(end.getDate() - days)
+      start.setHours(0, 0, 0, 0)
+    }
+
+    setStartDate(start.toISOString().split('T')[0])
+    setEndDate(end.toISOString().split('T')[0])
+  }
+
+  const handleSearch = () => {
+    setCurrentPage(1)
+    setSearchTerm(tempSearchTerm)
+    setFilterUserId(tempFilterUserId)
+    queryClient.invalidateQueries({ queryKey: ['clipboard-items'] })
+  }
+
+  const handleReset = () => {
+    setSearchTerm('')
+    setTempSearchTerm('')
+    setFilterUserId('')
+    setTempFilterUserId('')
+    setStartDate('')
+    setEndDate('')
+    setFilterType('all')
+    setFilterStatus('all')
+    setCurrentPage(1)
+  }
+
+
   const handleSelectItem = (itemId: string) => {
     setSelectedItems(prev => 
       prev.includes(itemId) 
@@ -166,34 +227,47 @@ const ClipboardManagement: React.FC = () => {
   }
 
   const filteredItems = clipboardItems?.filter(item => {
-    const matchesType = filterType === 'all' || (item.type || 'unknown') === filterType
+    // 后端已处理类型和搜索过滤，前端只处理状态过滤（如果需要）
+    // 注意：如果后端不返回已删除的项，这里的 'deleted' 状态可能永远无法匹配到数据
+    // 除非后端接口支持返回已删除数据
     const matchesStatus = filterStatus === 'all' || 
       (filterStatus === 'active' && !item.isDeleted) ||
       (filterStatus === 'deleted' && item.isDeleted)
     
-    const matchesSearch = searchTerm === '' ||
-      item.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.deviceName.toLowerCase().includes(searchTerm.toLowerCase())
-    
-    return matchesType && matchesStatus && matchesSearch
+    return matchesStatus
   })
 
   const getTypeIcon = (type: string) => {
     switch (type) {
-      case 'text': return '📝'
-      case 'image': return '🖼️'
-      case 'file': return '📁'
-      default: return '📄'
+      case 'text': return (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      )
+      case 'image': return (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+        </svg>
+      )
+      case 'file': return (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+        </svg>
+      )
+      default: return (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+        </svg>
+      )
     }
   }
 
   const getTypeColor = (type: string) => {
     switch (type) {
-      case 'text': return 'bg-blue-100 text-blue-800'
-      case 'image': return 'bg-green-100 text-green-800'
-      case 'file': return 'bg-purple-100 text-purple-800'
-      default: return 'bg-gray-100 text-gray-800'
+      case 'text': return 'bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-700/10'
+      case 'image': return 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20'
+      case 'file': return 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20'
+      default: return 'bg-slate-50 text-slate-600 ring-1 ring-inset ring-slate-500/10'
     }
   }
 
@@ -209,7 +283,7 @@ const ClipboardManagement: React.FC = () => {
     return content.length > maxLength ? content.substring(0, maxLength) + '...' : content
   }
 
-  if (isLoading) {
+  if (isLoading && !clipboardData) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -229,8 +303,10 @@ const ClipboardManagement: React.FC = () => {
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex items-center">
             <div className="flex-shrink-0">
-              <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                <span className="text-blue-600 font-semibold">📋</span>
+              <div className="w-8 h-8 bg-indigo-50 rounded-lg flex items-center justify-center">
+                <svg className="w-5 h-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
               </div>
             </div>
             <div className="ml-4">
@@ -243,8 +319,10 @@ const ClipboardManagement: React.FC = () => {
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex items-center">
             <div className="flex-shrink-0">
-              <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                <span className="text-green-600 font-semibold">📝</span>
+              <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center">
+                <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
               </div>
             </div>
             <div className="ml-4">
@@ -259,8 +337,10 @@ const ClipboardManagement: React.FC = () => {
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex items-center">
             <div className="flex-shrink-0">
-              <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
-                <span className="text-purple-600 font-semibold">🖼️</span>
+              <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center">
+                <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
               </div>
             </div>
             <div className="ml-4">
@@ -275,8 +355,10 @@ const ClipboardManagement: React.FC = () => {
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex items-center">
             <div className="flex-shrink-0">
-              <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center">
-                <span className="text-orange-600 font-semibold">💾</span>
+              <div className="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center">
+                <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                </svg>
               </div>
             </div>
             <div className="ml-4">
@@ -290,79 +372,163 @@ const ClipboardManagement: React.FC = () => {
       </div>
 
       {/* 剪贴板列表 */}
-      <div className="bg-white shadow rounded-lg">
+      <div className="bg-white shadow rounded-lg relative">
+        {isFetching && clipboardData && (
+          <div className="absolute inset-0 bg-white bg-opacity-50 z-10 flex items-center justify-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          </div>
+        )}
         <div className="px-6 py-4 border-b border-gray-200">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-medium text-gray-900">剪贴板项目</h3>
-            <div className="flex items-center space-x-4">
-              {/* 搜索框 */}
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="搜索内容、用户或设备..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-64 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              
-              {/* 类型筛选 */}
-              <select
-                value={filterType}
-                onChange={(e) => setFilterType(e.target.value as any)}
-                className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="all">全部类型</option>
-                <option value="text">文本</option>
-                <option value="image">图片</option>
-                <option value="file">文件</option>
-              </select>
-              
-              {/* 状态筛选 */}
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value as any)}
-                className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="all">全部状态</option>
-                <option value="active">正常</option>
-                <option value="deleted">已删除</option>
-              </select>
-              
-              {/* 每页显示数量 */}
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value))
-                  setCurrentPage(1)
-                }}
-                className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value={10}>10条/页</option>
-                <option value={20}>20条/页</option>
-                <option value={50}>50条/页</option>
-                <option value={100}>100条/页</option>
-              </select>
-              
-              {/* 批量操作 */}
-              {selectedItems.length > 0 && (
+          <div className="flex flex-col space-y-4">
+            {/* 顶部操作栏：标题和批量操作 */}
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-medium text-gray-900">剪贴板项目</h3>
+              <div className="flex items-center space-x-2">
+                 {/* 批量操作 */}
+                {selectedItems.length > 0 && (
+                  <button
+                    onClick={handleBatchDelete}
+                    disabled={batchDeleteMutation.isPending}
+                    className="px-4 py-2 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors disabled:opacity-50"
+                  >
+                    删除选中 ({selectedItems.length})
+                  </button>
+                )}
+                
+                {/* 清空所有 */}
                 <button
-                  onClick={handleBatchDelete}
-                  disabled={batchDeleteMutation.isPending}
-                  className="px-4 py-2 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors disabled:opacity-50"
+                  onClick={handleClearAll}
+                  disabled={clearAllMutation.isPending}
+                  className="px-4 py-2 bg-gray-600 text-white text-sm rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50"
                 >
-                  删除选中 ({selectedItems.length})
+                  清空所有
                 </button>
-              )}
-              
-              {/* 清空所有 */}
-              <button
-                onClick={handleClearAll}
-                disabled={clearAllMutation.isPending}
-                className="px-4 py-2 bg-gray-600 text-white text-sm rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50"
-              >
-                清空所有
-              </button>
+              </div>
+            </div>
+
+            {/* 筛选工具栏 */}
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* 搜索框 */}
+                <div className="relative flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="搜索内容..."
+                    value={tempSearchTerm}
+                    onChange={(e) => setTempSearchTerm(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                    className="w-64 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                {/* 用户ID筛选 */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="用户ID"
+                    value={tempFilterUserId}
+                    onChange={(e) => setTempFilterUserId(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                    className="w-24 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                {/* 日期范围 */}
+                <div className="flex items-center space-x-2 bg-gray-50 p-1 rounded-md border border-gray-200">
+                   <input 
+                      type="date" 
+                      value={startDate} 
+                      onChange={e => setStartDate(e.target.value)} 
+                      className="px-2 py-1 text-sm border-none bg-transparent focus:ring-0" 
+                      title="开始日期"
+                   />
+                   <span className="text-gray-500">-</span>
+                   <input 
+                      type="date" 
+                      value={endDate} 
+                      onChange={e => setEndDate(e.target.value)} 
+                      className="px-2 py-1 text-sm border-none bg-transparent focus:ring-0" 
+                      title="结束日期"
+                   />
+                </div>
+                
+                {/* 类型筛选 */}
+                <select
+                  value={filterType}
+                  onChange={(e) => setFilterType(e.target.value as any)}
+                  className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="all">全部类型</option>
+                  <option value="text">文本</option>
+                  <option value="image">图片</option>
+                  <option value="file">文件</option>
+                </select>
+                
+                {/* 状态筛选 */}
+                <select
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value as any)}
+                  className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="all">全部状态</option>
+                  <option value="active">正常</option>
+                  <option value="deleted">已删除</option>
+                </select>
+
+                {/* 重置按钮 */}
+                <button
+                  onClick={handleReset}
+                  className="px-3 py-2 text-gray-600 hover:text-gray-800 text-sm transition-colors"
+                >
+                  重置
+                </button>
+                
+                {/* 每页显示数量 */}
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value))
+                    setCurrentPage(1)
+                  }}
+                  className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ml-auto"
+                >
+                  <option value={10}>10条/页</option>
+                  <option value={20}>20条/页</option>
+                  <option value={50}>50条/页</option>
+                  <option value={100}>100条/页</option>
+                </select>
+
+                {/* 搜索按钮 - 移到最右边 */}
+                <button
+                  onClick={handleSearch}
+                  className="px-3 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors"
+                >
+                  搜索
+                </button>
+              </div>
+
+              {/* 快速时间筛选 */}
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-gray-500">快速筛选：</span>
+                {[
+                  { label: '24小时', value: 1 },
+                  { label: '3天', value: 3 },
+                  { label: '7天', value: 7 },
+                  { label: '30天', value: 30 },
+                  { label: '60天', value: 60 },
+                  { label: '90天', value: 90 },
+                  { label: '半年', value: 180 },
+                  { label: '一年', value: 365 },
+                ].map((preset) => (
+                  <button
+                    key={preset.value}
+                    onClick={() => handleDatePreset(preset.value)}
+                    className="px-2 py-1 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded transition-colors"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -418,15 +584,9 @@ const ClipboardManagement: React.FC = () => {
                   </td>
                   <td className="px-6 py-4">
                     <div className="max-w-xs">
-                      <div className="text-sm font-medium text-gray-900 truncate">
+                      <div className="text-sm font-medium text-gray-900 truncate" title={item.type === 'text' ? item.content : ''}>
                         {item.type === 'text' ? truncateContent(item.content) : `[${item.type?.toUpperCase() || 'UNKNOWN'}]`}
                       </div>
-                      <button
-                        onClick={() => handleViewDetail(item)}
-                        className="text-xs text-blue-600 hover:text-blue-800"
-                      >
-                        查看详情
-                      </button>
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
@@ -459,21 +619,37 @@ const ClipboardManagement: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <div className="flex space-x-2">
+                    <div className="flex items-center space-x-3">
+                      <button
+                        onClick={() => handleViewDetail(item)}
+                        className="text-gray-400 hover:text-blue-600 transition-colors p-1 hover:bg-blue-50 rounded"
+                        title="查看详情"
+                      >
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      </button>
                       {item.isDeleted ? (
                         <button
                           onClick={() => handleRestoreItem(item.id)}
-                          className="text-green-600 hover:text-green-900 transition-colors"
+                          className="text-gray-400 hover:text-green-600 transition-colors p-1 hover:bg-green-50 rounded"
+                          title="恢复"
                         >
-                          恢复
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                          </svg>
                         </button>
                       ) : (
                         <button
                           type="button"
                           onClick={() => handleDeleteItem(item.id)}
-                          className="text-red-600 hover:text-red-900 transition-colors"
+                          className="text-gray-400 hover:text-red-600 transition-colors p-1 hover:bg-red-50 rounded"
+                          title="删除"
                         >
-                          删除
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
                         </button>
                       )}
                     </div>

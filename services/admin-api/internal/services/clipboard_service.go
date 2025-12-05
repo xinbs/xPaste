@@ -19,13 +19,30 @@ func NewClipboardService() *ClipboardService {
 }
 
 // GetAllClipboards 获取所有剪贴板内容（分页）
-func (s *ClipboardService) GetAllClipboards(page, limit int, contentType string) ([]models.Clipboard, int64, error) {
+func (s *ClipboardService) GetAllClipboards(page, limit int, contentType, search, startDate, endDate string, userID uint) ([]models.Clipboard, int64, error) {
 	var clipboards []models.Clipboard
 	var total int64
 
 	query := s.db.Model(&models.Clipboard{}).Preload("User")
+
 	if contentType != "" {
 		query = query.Where("type = ?", contentType)
+	}
+
+	if search != "" {
+		query = query.Where("content LIKE ?", "%"+search+"%")
+	}
+
+	if startDate != "" {
+		query = query.Where("created_at >= ?", startDate)
+	}
+
+	if endDate != "" {
+		query = query.Where("created_at <= ?", endDate)
+	}
+
+	if userID != 0 {
+		query = query.Where("user_id = ?", userID)
 	}
 
 	// 获取总数
