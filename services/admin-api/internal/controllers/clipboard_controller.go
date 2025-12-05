@@ -65,8 +65,17 @@ func (ctrl *ClipboardController) GetAllClipboards(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	contentType := c.Query("type")
+	search := c.Query("search")
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	userIDStr := c.Query("user_id")
+	var userID uint
+	if userIDStr != "" {
+		id, _ := strconv.ParseUint(userIDStr, 10, 32)
+		userID = uint(id)
+	}
 
-	clipboards, total, err := ctrl.clipboardService.GetAllClipboards(page, limit, contentType)
+	clipboards, total, err := ctrl.clipboardService.GetAllClipboards(page, limit, contentType, search, startDate, endDate, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "获取剪贴板列表失败",

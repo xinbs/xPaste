@@ -12,13 +12,13 @@ services:
     environment:
       - GIN_MODE=debug
       - DB_TYPE=sqlite
-      - DB_PATH=/data/xpaste.db
+      - DB_DSN=/data/xpaste.db
       - LOG_LEVEL=debug
       - JWT_SECRET=${JWT_SECRET:-dev-secret-key}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
     volumes:
       - ./services/sync-api:/app
-      - sync-data:/data
+      - ./services/sync-api/data:/data
     restart: unless-stopped
 
   admin-api:
@@ -38,7 +38,7 @@ services:
       - CORS_ALLOW_ALL=true
     volumes:
       - ./services/admin-api:/app
-      - sync-data:/data
+      - ./services/sync-api/data:/data
     restart: unless-stopped
     depends_on:
       - sync-api

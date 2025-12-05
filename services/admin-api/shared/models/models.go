@@ -13,7 +13,7 @@ type User struct {
 	Username  string         `json:"username" gorm:"uniqueIndex;not null"`
 	Email     string         `json:"email" gorm:"uniqueIndex"`
 	Password  string         `json:"-" gorm:"column:password_hash;not null"`
-	Nickname  string         `json:"nickname" gorm:"-"` // users 表无 nickname，忽略
+	Nickname  string         `json:"nickname" gorm:"column:display_name"`
 	Status    int            `json:"status" gorm:"not null;default:1"`
 	Devices   []Device       `json:"devices,omitempty" gorm:"foreignKey:UserID"`
 }
