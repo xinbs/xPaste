@@ -19,7 +19,33 @@ var DB *gorm.DB
 // InitDatabase 初始化SQLite数据库连接
 func InitDatabase() error {
 	// 获取数据库文件路径
-	dbPath := getEnv("DB_PATH", "../sync-api/data/xpaste.db")
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		// 尝试在常见位置查找数据库文件
+		commonPaths := []string{
+			"../sync-api/data/xpaste.db",             // 相对路径 (services/admin-api)
+			"../../sync-api/data/xpaste.db",          // 相对路径 (services/admin-api/cmd/server)
+			"services/sync-api/data/xpaste.db",       // 相对路径 (root)
+			"/data/xpaste.db",                        // Docker 容器内常用路径
+		}
+		
+		found := false
+		for _, p := range commonPaths {
+			if _, err := os.Stat(p); err == nil {
+				dbPath = p
+				found = true
+				break
+			}
+		}
+		
+		if !found {
+			// 如果找不到，使用默认路径
+			dbPath = "../sync-api/data/xpaste.db"
+			log.Printf("警告: 未找到现有的数据库文件，将使用默认路径: %s", dbPath)
+		} else {
+			log.Printf("找到数据库文件: %s", dbPath)
+		}
+	}
 	
 	// 确保数据库文件路径是绝对路径
 	if !filepath.IsAbs(dbPath) {
