@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/store/auth';
+import { useToastStore } from '@/store/toast';
+import apiClient from '@/lib/api';
 import Login from '@/components/Login';
 import DeviceSetup from '@/components/DeviceSetup';
 import Dashboard from '@/components/Dashboard';
@@ -8,11 +10,18 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import ToastContainer from '@/components/ToastContainer';
 
 export default function App() {
-  const { isAuthenticated, currentDevice, user, validateToken, fetchDevices, clearStorage } = useAuthStore();
+  const { isAuthenticated, currentDevice, user, validateToken, fetchDevices, clearStorage, logout } = useAuthStore();
   const [isInitialized, setIsInitialized] = useState(false);
   const [currentRoute, setCurrentRoute] = useState(window.location.hash.slice(1) || '/');
 
   useEffect(() => {
+    // 设置API客户端的未授权回调
+    apiClient.setUnauthorizedHandler(() => {
+      console.log('检测到Token失效，自动登出');
+      logout();
+      useToastStore.getState().showWarning('会话已过期', '请重新登录');
+    });
+
     const initializeApp = async () => {
       // 如果有token，验证其有效性
       if (isAuthenticated) {

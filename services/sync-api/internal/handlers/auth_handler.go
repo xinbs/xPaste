@@ -54,8 +54,6 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-
-
 	// 注册用户
 	user, err := h.userService.Register(&req)
 	if err != nil {
@@ -74,7 +72,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	refreshToken, err := middleware.GenerateRefreshToken(user.ID, user.Username)
+	refreshToken, err := middleware.GenerateRefreshToken(user.ID, user.Username, "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("Failed to generate refresh token: "+err.Error()))
 		return
@@ -155,7 +153,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	refreshToken, err := middleware.GenerateRefreshToken(user.ID, user.Username)
+	refreshToken, err := middleware.GenerateRefreshToken(user.ID, user.Username, req.DeviceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("Failed to generate refresh token: "+err.Error()))
 		return
@@ -216,15 +214,31 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
+	// 验证设备状态（如果 Token 中包含 DeviceID）
+	if claims.DeviceID != "" {
+		var device models.Device
+		if err := h.db.Where("device_id = ? AND user_id = ?", claims.DeviceID, claims.UserID).First(&device).Error; err != nil {
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse("Device not found or removed"))
+			return
+		}
+		if !device.IsActive() {
+			c.JSON(http.StatusUnauthorized, models.ErrorResponse("Device is inactive"))
+			return
+		}
+	}
+
 	// 生成新的访问令牌
-	accessToken, err := middleware.GenerateToken(user.ID, user.Username, claims.DeviceID)
+	// 优先使用 RefreshToken 中的 DeviceID
+	deviceID := claims.DeviceID
+
+	accessToken, err := middleware.GenerateToken(user.ID, user.Username, deviceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("Failed to generate access token: "+err.Error()))
 		return
 	}
 
 	// 生成新的刷新令牌
-	newRefreshToken, err := middleware.GenerateRefreshToken(user.ID, user.Username)
+	newRefreshToken, err := middleware.GenerateRefreshToken(user.ID, user.Username, deviceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse("Failed to generate refresh token: "+err.Error()))
 		return

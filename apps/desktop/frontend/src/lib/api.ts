@@ -2,10 +2,33 @@ import { useConfigStore } from '@/store/config';
 
 class ApiClient {
   private token: string | null = null;
+  private refreshTokenValue: string | null = null;
+  private onUnauthorized: (() => void) | null = null;
+  private onTokenRefresh: ((newToken: string, newRefreshToken: string) => void) | null = null;
+  private isRefreshing: boolean = false;
+  private failedRequestsQueue: Array<{
+    resolve: (value: unknown) => void;
+    reject: (reason?: any) => void;
+  }> = [];
 
   constructor() {
     // 从Zustand认证存储获取token
     this.loadTokenFromStorage();
+  }
+
+  // 设置未授权回调
+  setUnauthorizedHandler(handler: () => void) {
+    this.onUnauthorized = handler;
+  }
+
+  // 设置token刷新回调
+  setOnTokenRefresh(callback: (newToken: string, newRefreshToken: string) => void) {
+    this.onTokenRefresh = callback;
+  }
+
+  // 设置刷新token
+  setRefreshToken(token: string) {
+    this.refreshTokenValue = token;
   }
   
   private loadTokenFromStorage() {
@@ -14,11 +37,13 @@ class ApiClient {
       if (authStorage) {
         const authData = JSON.parse(authStorage);
         this.token = authData.state?.token || null;
+        this.refreshTokenValue = authData.state?.refreshToken || null;
         console.log('从存储加载token:', this.token ? 'Token已加载' : '未找到token');
       }
     } catch (error) {
       console.error('加载token失败:', error);
       this.token = null;
+      this.refreshTokenValue = null;
     }
   }
   
@@ -68,6 +93,7 @@ class ApiClient {
 
   clearToken() {
     this.token = null;
+    this.refreshTokenValue = null;
     // 清除Zustand认证存储中的token
     try {
       const authStorage = localStorage.getItem('auth-storage');
@@ -75,6 +101,7 @@ class ApiClient {
         const authData = JSON.parse(authStorage);
         if (authData.state) {
           authData.state.token = null;
+          authData.state.refreshToken = null;
           authData.state.isAuthenticated = false;
           localStorage.setItem('auth-storage', JSON.stringify(authData));
         }
@@ -124,6 +151,77 @@ class ApiClient {
       }
 
       if (!response.ok) {
+        if (response.status === 401) {
+          // 如果是登录接口本身，直接抛出错误
+          if (endpoint.includes('/auth/login')) {
+             const errorData = await response.json().catch(() => ({}));
+             throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+          }
+
+          // 尝试刷新token
+          if (this.refreshTokenValue) {
+            try {
+              if (!this.isRefreshing) {
+                this.isRefreshing = true;
+                
+                // 发起刷新请求
+                const refreshResponse = await fetch(`${this.getBaseURL()}/auth/refresh`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ token: this.refreshTokenValue }),
+                });
+                
+                if (refreshResponse.ok) {
+                  const refreshData = await refreshResponse.json();
+                  if (refreshData.success && refreshData.data) {
+                    const newToken = refreshData.data.access_token;
+                    const newRefreshToken = refreshData.data.refresh_token;
+                    
+                    this.token = newToken;
+                    this.refreshTokenValue = newRefreshToken;
+                    
+                    // 通知外部更新token
+                    if (this.onTokenRefresh) {
+                      this.onTokenRefresh(newToken, newRefreshToken);
+                    }
+                    
+                    // 处理队列中的请求
+                    this.failedRequestsQueue.forEach(({ resolve, reject }) => {
+                      // 重新发起请求
+                      this.request(endpoint, options).then(resolve).catch(reject);
+                    });
+                    this.failedRequestsQueue = [];
+                    
+                    // 重试当前请求
+                    this.isRefreshing = false;
+                    return this.request<T>(endpoint, options);
+                  }
+                }
+                
+                // 刷新失败
+                throw new Error('Token refresh failed');
+              } else {
+                // 正在刷新中，将请求加入队列
+                return new Promise<T>((resolve, reject) => {
+                  this.failedRequestsQueue.push({ resolve, reject });
+                });
+              }
+            } catch (refreshError) {
+              // 刷新失败，清除状态并登出
+              this.isRefreshing = false;
+              this.failedRequestsQueue = [];
+              this.clearToken();
+              if (this.onUnauthorized) {
+                this.onUnauthorized();
+              }
+            }
+          } else if (this.onUnauthorized) {
+             // 没有刷新token，直接登出
+             this.onUnauthorized();
+          }
+        }
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
       }

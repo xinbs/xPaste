@@ -468,7 +468,7 @@ function createWindow() {
     height: 600,          // 较高的高度，便于显示历史记录列表
     minWidth: 320,        // 最小宽度限制，保证基本可用性
     minHeight: 400,       // 最小高度
-    maxWidth: 800,        // 最大宽度限制，避免过宽
+    // maxWidth: 800,        // 最大宽度限制，避免过宽
     resizable: true,      // 允许调整大小
     webPreferences: {
       nodeIntegration: false,

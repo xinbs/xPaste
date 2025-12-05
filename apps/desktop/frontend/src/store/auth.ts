@@ -49,6 +49,7 @@ interface AuthState {
   isLoading: boolean;
   error: string | null;
   token: string | null;
+  refreshToken: string | null;
   validateToken: () => Promise<boolean>;
   login: (username: string, password: string) => Promise<boolean>;
   register: (username: string, email: string, password: string) => Promise<boolean>;
@@ -71,16 +72,25 @@ export const useAuthStore = create<AuthState>()(
       isLoading: false,
       error: null,
       token: null,
+      refreshToken: null,
 
       // 验证token有效性
       validateToken: async () => {
-        const { token } = get();
+        const { token, refreshToken } = get();
         if (!token) {
           return false;
         }
 
         // 设置token到apiClient
         apiClient.setToken(token);
+        if (refreshToken) {
+          apiClient.setRefreshToken(refreshToken);
+        }
+
+        // 设置token刷新回调
+        apiClient.setOnTokenRefresh((newToken, newRefreshToken) => {
+          set({ token: newToken, refreshToken: newRefreshToken });
+        });
 
         try {
           // 尝试调用一个需要认证的API来验证token
@@ -115,7 +125,19 @@ export const useAuthStore = create<AuthState>()(
               user: response.data.user,
               isAuthenticated: true,
               token: response.data.access_token,
+              refreshToken: response.data.refresh_token,
               isLoading: false,
+            });
+            
+            // 设置token到apiClient
+            apiClient.setToken(response.data.access_token);
+            if (response.data.refresh_token) {
+              apiClient.setRefreshToken(response.data.refresh_token);
+            }
+            
+            // 设置token刷新回调
+            apiClient.setOnTokenRefresh((newToken, newRefreshToken) => {
+              set({ token: newToken, refreshToken: newRefreshToken });
             });
             
             // 登录成功后获取设备列表并设置当前设备
@@ -405,6 +427,7 @@ export const useAuthStore = create<AuthState>()(
           currentDevice: null,
           devices: [],
           token: null,
+          refreshToken: null,
           error: null,
           isLoading: false,
         });
@@ -419,11 +442,25 @@ export const useAuthStore = create<AuthState>()(
         isAuthenticated: state.isAuthenticated,
         currentDevice: state.currentDevice,
         token: state.token,
+        refreshToken: state.refreshToken,
       }),
       onRehydrateStorage: () => (state) => {
         // 在 store 恢复后，如果有 token 则设置到 apiClient
         if (state?.token) {
           apiClient.setToken(state.token);
+          if (state.refreshToken) {
+            apiClient.setRefreshToken(state.refreshToken);
+          }
+          // 设置token刷新回调
+          apiClient.setOnTokenRefresh((newToken, newRefreshToken) => {
+            // 注意：这里不能直接调用 useAuthStore.getState().set(...)，因为可能导致循环调用
+            // 我们只需要确保下次 persist 时能保存最新的 token 即可
+            // 但为了实时性，我们还是尝试更新 store
+            if (state) {
+              state.token = newToken;
+              state.refreshToken = newRefreshToken;
+            }
+          });
         }
       },
     }

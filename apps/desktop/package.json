@@ -13,6 +13,7 @@
     "electron": "electron .",
     "electron:dev": "NODE_ENV=development electron .",
     "gen:mac-icon": "node create-platform-icons.cjs",
+    "build:fast": "./fast-build.sh",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "npm run gen:mac-icon && npm run build && electron-builder --mac",
     "build:linux": "npm run build && electron-builder --linux"

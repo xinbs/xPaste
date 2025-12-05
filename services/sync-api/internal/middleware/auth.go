@@ -85,13 +85,46 @@ func AuthMiddleware(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		// 检查设备状态（如果 Token 中包含 DeviceID）
+		if claims.DeviceID != "" {
+			var device models.Device
+			if err := db.Where("device_id = ? AND user_id = ?", claims.DeviceID, claims.UserID).First(&device).Error; err != nil {
+				if err == gorm.ErrRecordNotFound {
+					c.JSON(http.StatusUnauthorized, models.ErrorResponse("Device not found or removed"))
+				} else {
+					c.JSON(http.StatusInternalServerError, models.ErrorResponse("Database error checking device"))
+				}
+				c.Abort()
+				return
+			}
+
+			if !device.IsActive() {
+				c.JSON(http.StatusUnauthorized, models.ErrorResponse("Device is inactive or revoked"))
+				c.Abort()
+				return
+			}
+
+			// 将设备ID存储到上下文
+			c.Set("device_id", claims.DeviceID)
+		}
+
+		// 检查设备状态（如果 Token 中包含 DeviceID）
+		if claims.DeviceID != "" {
+			// 将设备ID存储到上下文，无论是否验证成功（这里只是做个标记，或者可以先移除这段）
+			// c.Set("device_id", claims.DeviceID)
+			// 上面的代码已经移除了原始的设置逻辑，改为在验证通过后设置
+		} else {
+			// 兼容旧 Token 或无设备 ID 的情况（视业务需求而定，建议严格要求）
+			// 如果不强制要求，可以什么都不做
+		}
+
 		// 将用户信息存储到上下文中
 		c.Set("user_id", claims.UserID)
 		c.Set("username", claims.Username)
 		c.Set("user", &user)
-		if claims.DeviceID != "" {
-			c.Set("device_id", claims.DeviceID)
-		}
+		// if claims.DeviceID != "" { // 这部分逻辑已经移动到上面验证通过后了
+		// 	c.Set("device_id", claims.DeviceID)
+		// }
 
 		c.Next()
 	}
@@ -103,19 +136,19 @@ func OptionalAuthMiddleware(db *gorm.DB) gin.HandlerFunc {
 		// 首先尝试从 Authorization 头获取 token
 		authHeader := c.GetHeader("Authorization")
 		var tokenString string
-		
+
 		if authHeader != "" {
 			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
 			if tokenString == authHeader {
 				tokenString = ""
 			}
 		}
-		
+
 		// 如果 Authorization 头中没有 token，尝试从 URL 参数获取（用于 WebSocket）
 		if tokenString == "" {
 			tokenString = c.Query("token")
 		}
-		
+
 		// 如果没有找到 token，直接继续
 		if tokenString == "" {
 			c.Next()
@@ -171,12 +204,13 @@ func GenerateToken(userID uint, username string, deviceID string) (string, error
 }
 
 // GenerateRefreshToken 生成刷新令牌
-func GenerateRefreshToken(userID uint, username string) (string, error) {
+func GenerateRefreshToken(userID uint, username string, deviceID string) (string, error) {
 	expirationTime := time.Now().Add(7 * 24 * time.Hour) // 7天过期
 
 	claims := &Claims{
 		UserID:   userID,
 		Username: username,
+		DeviceID: deviceID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
