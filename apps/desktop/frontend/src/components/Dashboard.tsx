@@ -248,6 +248,7 @@ export default function Dashboard() {
 
   // 无限滚动
   useEffect(() => {
+    if (activeTab !== 'clipboard') return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && hasMore && !isLoadingMore && !clipboardLoading) {
@@ -256,7 +257,7 @@ export default function Dashboard() {
         }
       },
       { 
-        root: clipboardScrollRef.current, // 在滚动容器内观察
+        root: clipboardScrollRef.current,
         threshold: 1.0 
       }
     );
@@ -267,11 +268,9 @@ export default function Dashboard() {
     }
 
     return () => {
-      if (sentinel) {
-        observer.unobserve(sentinel);
-      }
+      observer.disconnect();
     };
-  }, [hasMore, isLoadingMore, clipboardLoading, loadMoreItems]);
+  }, [activeTab, hasMore, isLoadingMore, clipboardLoading, loadMoreItems]);
 
   const handleAddTextItem = async () => {
     if (!newClipText.trim()) return;
