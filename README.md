@@ -185,6 +185,14 @@ NODE_ENV=production pnpm electron
 $env:NODE_ENV="production"; pnpm electron
 ```
 
+### 生产模式一键启动（Windows）
+
+```powershell
+# 在 apps/desktop 目录
+./start-production.ps1     # 设置 NODE_ENV=production 并构建+启动 Electron
+./test-production.ps1      # 快速验证生产构建与运行
+```
+
 ### 服务端口说明
 
 - **后端同步API服务**: http://localhost:8080
@@ -206,6 +214,10 @@ pnpm dev                    # 启动前端开发服务器 (Vite)
 pnpm build                  # 构建前端生产版本
 pnpm electron               # 启动 Electron 应用
 pnpm electron:dev           # 启动 Electron 开发模式
+
+# Windows 一键打包（apps/desktop）
+./fast-build.ps1            # 一键构建前端并打包 Windows 安装包 + 便携版
+pnpm run build:win          # 常规 Windows 打包（NSIS + Portable）
 
 # 后端服务命令 (services/sync-api)
 pnpm dev                    # 启动开发服务器
@@ -358,6 +370,27 @@ pnpm install
 - ✅ 快捷键配置
 - ✅ 响应式界面
 - ✅ 独立设置窗口 - 设置界面从主窗口分离，提供更好的用户体验
+
+## 截图预览
+
+> 目录：`Screenshot/`
+
+![主界面 - 粘贴板历史记录](Screenshot/主界面-粘贴板历史记录.png)
+![主界面 - 设置](Screenshot/主界面-设置.png)
+![后台 - 仪表盘](Screenshot/后台-仪表盘.png)
+![后台 - 粘贴板管理](Screenshot/后台-粘贴板管理.png)
+
+## 构建与打包
+
+### Windows
+- 一键快速打包（推荐）：在 `apps/desktop` 下运行 `./fast-build.ps1`
+- 常规打包：`pnpm run build:win`（生成 `dist-electron/xPaste Setup *.exe` 与 `xPaste *.exe`）
+- 说明：已统一所有 PowerShell 脚本为 UTF‑8 编码；如遇 `winCodeSign` 相关网络或权限问题，`fast-build.ps1` 会自动预处理缓存以提升成功率。
+
+### macOS
+- 生成图标（如缺失）：`npm run gen:mac-icon`
+- 打包：`npm run build:mac`
+
 
 ## 实现阶段
 
