@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useAuthStore } from '@/store/auth';
 import { useToastStore } from '@/store/toast';
 import apiClient from '@/lib/api';
@@ -13,6 +13,7 @@ export default function App() {
   const { isAuthenticated, currentDevice, user, validateToken, fetchDevices, clearStorage, logout } = useAuthStore();
   const [isInitialized, setIsInitialized] = useState(false);
   const [currentRoute, setCurrentRoute] = useState(window.location.hash.slice(1) || '/');
+  const isFirstRun = useRef(true);
 
   useEffect(() => {
     // 设置API客户端的未授权回调
@@ -23,19 +24,23 @@ export default function App() {
     });
 
     const initializeApp = async () => {
+      // 仅在首次加载时执行初始化检查
+      if (!isFirstRun.current) return;
+      isFirstRun.current = false;
+
       // 如果有token，验证其有效性
-      if (isAuthenticated) {
+      // 注意：这里读取的是组件挂载时的 isAuthenticated 状态
+      // 如果是刷新页面，useAuthStore 会从 localStorage 恢复状态，isAuthenticated 可能为 true
+      if (useAuthStore.getState().isAuthenticated) {
+        console.log('应用启动，验证Token有效性...');
         const tokenValid = await validateToken();
         
         // 如果token有效且有currentDevice，验证设备是否仍然存在
-        if (tokenValid && currentDevice) {
+        if (tokenValid && useAuthStore.getState().currentDevice) {
           try {
             await fetchDevices();
-            // fetchDevices会更新devices列表，如果currentDevice不在列表中，说明设备已被删除
-            // 这种情况下需要清除currentDevice，让用户重新注册设备
           } catch (error) {
             console.warn('Failed to fetch devices, clearing current device:', error);
-            // 如果获取设备列表失败，清除当前设备状态，让用户重新注册
             clearStorage();
           }
         }
@@ -57,7 +62,7 @@ export default function App() {
     return () => {
       window.removeEventListener('hashchange', handleHashChange);
     };
-  }, [validateToken]); // 移除isAuthenticated依赖，避免无限循环
+  }, []); // 空依赖数组，确保只执行一次
 
   const renderContent = () => {
     if (!isInitialized) {

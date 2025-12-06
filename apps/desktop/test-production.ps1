@@ -1,6 +1,11 @@
 # 测试生产模式的 Electron 应用
 # 这将显示自定义标题栏和窗口控制按钮
 
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+chcp.com 65001 | Out-Null
+
 Write-Host "🚀 启动生产模式 Electron 应用..." -ForegroundColor Green
 Write-Host ""
 

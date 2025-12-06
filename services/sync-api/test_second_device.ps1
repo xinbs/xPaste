@@ -1,3 +1,9 @@
+# 设置控制台为 UTF-8，避免中文乱码
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+chcp.com 65001 | Out-Null
+
 # Test script to simulate a second device connecting to WebSocket
 
 # First, register a new device

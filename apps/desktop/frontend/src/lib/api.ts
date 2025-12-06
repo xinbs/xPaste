@@ -78,37 +78,11 @@ class ApiClient {
 
   setToken(token: string) {
     this.token = token;
-    // 更新Zustand认证存储中的token
-    try {
-      const authStorage = localStorage.getItem('auth-storage');
-      if (authStorage) {
-        const authData = JSON.parse(authStorage);
-        authData.state.token = token;
-        localStorage.setItem('auth-storage', JSON.stringify(authData));
-      }
-    } catch (error) {
-      console.error('更新token失败:', error);
-    }
   }
 
   clearToken() {
     this.token = null;
     this.refreshTokenValue = null;
-    // 清除Zustand认证存储中的token
-    try {
-      const authStorage = localStorage.getItem('auth-storage');
-      if (authStorage) {
-        const authData = JSON.parse(authStorage);
-        if (authData.state) {
-          authData.state.token = null;
-          authData.state.refreshToken = null;
-          authData.state.isAuthenticated = false;
-          localStorage.setItem('auth-storage', JSON.stringify(authData));
-        }
-      }
-    } catch (error) {
-      console.error('清除token失败:', error);
-    }
   }
   
   // 刷新token（从存储重新加载）
@@ -128,6 +102,9 @@ class ApiClient {
 
     if (this.token) {
       (headers as Record<string, string>).Authorization = `Bearer ${this.token}`;
+      // console.log(`[API] Requesting ${endpoint} with token: ${this.token.substring(0, 10)}...`);
+    } else {
+      // console.log(`[API] Requesting ${endpoint} without token`);
     }
 
     const { signal, ...restOptions } = options;
@@ -152,6 +129,7 @@ class ApiClient {
 
       if (!response.ok) {
         if (response.status === 401) {
+          console.warn(`[API] 401 Unauthorized for ${endpoint}`);
           // 如果是登录接口本身，直接抛出错误
           if (endpoint.includes('/auth/login')) {
              const errorData = await response.json().catch(() => ({}));
@@ -251,7 +229,7 @@ class ApiClient {
     const response = await this.request<{
       success: boolean;
       message: string;
-      data: { access_token: string; user: any };
+      data: { access_token: string; refresh_token?: string; user: any };
     }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify(requestBody),

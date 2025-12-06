@@ -115,11 +115,7 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null });
         try {
           // 获取当前设备ID和IP地址
-          const deviceId = getOrCreateDeviceId();
-          const { getLocalIPAddress } = await import('@/lib/device');
-          const privateIP = await getLocalIPAddress();
-          
-          const response = await apiClient.login(username, password, deviceId, privateIP);
+          const response = await apiClient.login(username, password);
           if (response.success) {
             set({
               user: response.data.user,
@@ -145,7 +141,8 @@ export const useAuthStore = create<AuthState>()(
               // 先获取设备列表
               const devicesResponse = await apiClient.getDevices();
               if (devicesResponse.success) {
-                const devices = devicesResponse.data.items;
+              const devices = devicesResponse.data.items;
+              const deviceId = getOrCreateDeviceId();
                 
                 // 查找当前设备ID对应的设备
                 const currentDeviceFromList = devices.find(device => device.device_id === deviceId);
