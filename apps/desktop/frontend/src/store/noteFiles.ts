@@ -20,6 +20,7 @@ interface NoteFilesState {
   isLoading: boolean
   error: string | null
   listDir: (dir?: string) => Promise<void>
+  listDirRaw: (dir: string) => Promise<DirEntry[]>
   readFile: (filePath: string) => Promise<string | null>
   writeFile: (filePath: string, content: string) => Promise<boolean>
   appendToFile: (filePath: string, content: string) => Promise<boolean>
@@ -73,6 +74,16 @@ export const useNoteFilesStore = create<NoteFilesState>()((set, get) => ({
       }
     } catch {
       set({ error: '目录读取失败', isLoading: false })
+    }
+  },
+
+  listDirRaw: async (dir: string) => {
+    try {
+      const res = await window.electronAPI.listDir(dir)
+      if (res && res.success) return res.data || []
+      return []
+    } catch {
+      return []
     }
   },
 

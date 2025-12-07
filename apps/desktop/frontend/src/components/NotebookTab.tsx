@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useMemo } from 'react'
 import { useNoteFilesStore } from '@/store/noteFiles'
 import { useToastStore } from '@/store/toast'
-import { FileText, FolderOpen, Save, RefreshCw, ArrowLeft, Folder as FolderIcon, Eye, Pencil, Sun, Moon } from 'lucide-react'
+import { FileText, FolderOpen, Save, RefreshCw, ArrowLeft, Folder as FolderIcon, Eye, Pencil, Sun, Moon, Search, ChevronUp, ChevronDown, ChevronRight, X, Plus, Star } from 'lucide-react'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/atom-one-dark.css'
 import MarkdownIt from 'markdown-it'
@@ -14,11 +14,13 @@ import { languages } from '@codemirror/language-data'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
+import { SearchQuery, setSearchQuery, findNext, findPrevious, highlightSelectionMatches } from '@codemirror/search'
 
 export default function NotebookTab() {
   const tree = useNoteFilesStore(s => s.tree)
   const isLoading = useNoteFilesStore(s => s.isLoading)
   const listDir = useNoteFilesStore(s => s.listDir)
+  const listDirRaw = useNoteFilesStore(s => s.listDirRaw)
   const readFile = useNoteFilesStore(s => s.readFile)
   const writeFile = useNoteFilesStore(s => s.writeFile)
   const setDefaultDir = useNoteFilesStore(s => s.setDefaultDir)
@@ -32,6 +34,18 @@ export default function NotebookTab() {
   const [saving, setSaving] = useState(false)
   const [preview, setPreview] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const [searchQuery, setSearch] = useState('')
+  const [previewMatchIndex, setPreviewMatchIndex] = useState(0)
+  const [previewMatchCount, setPreviewMatchCount] = useState(0)
+  const [sidebarWidth, setSidebarWidth] = useState<number>(288)
+  const [showCreate, setShowCreate] = useState(false)
+  const [newNoteName, setNewNoteName] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [childrenMap, setChildrenMap] = useState<Record<string, { entries: { name: string; path: string; isDirectory: boolean; isFile: boolean }[] }>>({})
+  const resizingRef = useRef(false)
+  const startXRef = useRef(0)
+  const startWRef = useRef(288)
   const previewRef = useRef<HTMLDivElement>(null)
   const mdRef = useRef<MarkdownIt | null>(null)
   const editorHostRef = useRef<HTMLDivElement | null>(null)
@@ -155,6 +169,64 @@ export default function NotebookTab() {
     listDir(p)
   }
 
+  const toggleExpand = async (dirPath: string) => {
+    try {
+      const isOpen = !!expanded[dirPath]
+      if (isOpen) {
+        setExpanded((prev) => ({ ...prev, [dirPath]: false }))
+        return
+      }
+      const entries = await listDirRaw(dirPath)
+      setChildrenMap((prev) => ({ ...prev, [dirPath]: { entries } }))
+      setExpanded((prev) => ({ ...prev, [dirPath]: true }))
+    } catch (e) {
+      useToastStore.getState().showError('展开失败', e instanceof Error ? e.message : '未知错误')
+    }
+  }
+
+  const renderTree = (entries: { name: string; path: string; isDirectory: boolean; isFile: boolean }[], depth: number) => {
+    const pad = depth * 12
+    return (
+      <ul className="space-y-1">
+        {entries.filter(e => e.isDirectory).map((e) => (
+          <li key={e.path}>
+            <div className="w-full flex items-center space-x-2 px-2 py-1 rounded text-xs text-gray-700 hover:bg-gray-100" style={{ paddingLeft: pad }}>
+              <button onClick={() => toggleExpand(e.path)} className="flex items-center">
+                {expanded[e.path] ? <ChevronDown className="w-3 h-3 text-gray-500" /> : <ChevronRight className="w-3 h-3 text-gray-500" />}
+              </button>
+              <button
+                onClick={() => {
+                  setCurrentDir(e.path)
+                  listDir(e.path)
+                }}
+                className="flex items-center space-x-2 flex-1 text-left"
+              >
+                <FolderIcon className="w-3 h-3 text-yellow-600" />
+                <span className="truncate">{e.name}</span>
+              </button>
+            </div>
+            {expanded[e.path] && childrenMap[e.path] && renderTree(childrenMap[e.path].entries, depth + 1)}
+          </li>
+        ))}
+        {entries.filter(e => e.isFile).map((e) => (
+          <li key={e.path}>
+            <button
+              onClick={() => openFile(e.path)}
+              className="w-full flex items-center space-x-2 px-2 py-1 rounded text-xs text-gray-700 hover:bg-gray-100"
+              style={{ paddingLeft: pad }}
+            >
+              <FileText className="w-3 h-3 text-blue-600" />
+              <span className="truncate flex-1 text-left">{e.name}</span>
+              {e.path === defaultFilePath && (
+                <Star className="w-3 h-3 text-yellow-500" />
+              )}
+            </button>
+          </li>
+        ))}
+      </ul>
+    )
+  }
+
   const safeHref = (href: string) => {
     try {
       if (href.startsWith('#') || href.startsWith('mailto:')) return href
@@ -176,6 +248,56 @@ export default function NotebookTab() {
       return ''
     } catch {
       return ''
+    }
+  }
+
+  const stamp = () => {
+    const d = new Date()
+    const p = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+  }
+
+  const createNote = async () => {
+    const baseDir = currentDir || getDefaultDir()
+    if (!baseDir) {
+      useToastStore.getState().showError('创建失败', '未设置目录')
+      return
+    }
+    let name = (newNoteName || '').trim()
+    if (!name) name = `新建笔记-${stamp()}.md`
+    if (!name.toLowerCase().endsWith('.md')) name = `${name}.md`
+    const path = joinPath(baseDir, name)
+    try {
+      setCreating(true)
+      let finalPath = path
+      let idx = 1
+      const exists = await readFile(finalPath)
+      if (exists !== null) {
+        while (idx < 100) {
+          const tryPath = joinPath(baseDir, `${name.replace(/\.md$/i, '')}-${idx}.md`)
+          const r = await readFile(tryPath)
+          if (r === null) { finalPath = tryPath; break }
+          idx++
+        }
+      }
+      const title = name.replace(/\.md$/i, '')
+      const initial = `# ${title}\n\n`
+      const ok = await writeFile(finalPath, initial)
+      setCreating(false)
+      if (ok) {
+        await setDefaultFile(finalPath)
+        setCurrentFile(finalPath)
+        setContent(initial)
+        listDir(baseDir)
+        setShowCreate(false)
+        setNewNoteName('')
+        useToastStore.getState().showSuccess('已创建', '新笔记已创建')
+      } else {
+        useToastStore.getState().showError('创建失败', '写入失败')
+      }
+    } catch (e) {
+      setCreating(false)
+      useToastStore.getState().showError('创建失败', e instanceof Error ? e.message : '未知错误')
     }
   }
 
@@ -232,6 +354,7 @@ export default function NotebookTab() {
     if (!preview && editorHostRef.current) {
       const extensions = [
         markdown({ base: markdownLanguage, codeLanguages: languages }),
+        highlightSelectionMatches(),
         syntaxHighlighting(mdStyle, { fallback: true }),
         EditorView.lineWrapping,
         EditorView.updateListener.of((v) => {
@@ -270,6 +393,87 @@ export default function NotebookTab() {
       }
     }
   }, [content, preview])
+
+  const applyEditorSearch = (dir: 'next' | 'prev') => {
+    if (!editorViewRef.current || !searchQuery) return
+    const view = editorViewRef.current
+    view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: searchQuery, caseSensitive: false })) })
+    if (dir === 'next') findNext(view)
+    else findPrevious(view)
+  }
+
+  const clearPreviewSearch = () => {
+    if (!previewRef.current) return
+    const container = previewRef.current
+    const marks = container.querySelectorAll('mark.preview-match')
+    marks.forEach((m) => {
+      const parent = m.parentNode
+      if (!parent) return
+      const text = document.createTextNode(m.textContent || '')
+      parent.replaceChild(text, m)
+      parent.normalize()
+    })
+    setPreviewMatchIndex(0)
+    setPreviewMatchCount(0)
+  }
+
+  const applyPreviewSearch = () => {
+    if (!previewRef.current) return
+    clearPreviewSearch()
+    if (!searchQuery) return
+    const container = previewRef.current
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+    const q = searchQuery.toLowerCase()
+    const nodes: Text[] = []
+    let node: Node | null = walker.nextNode()
+    while (node) {
+      const t = node as Text
+      if (t.nodeValue && t.nodeValue.toLowerCase().includes(q)) nodes.push(t)
+      node = walker.nextNode()
+    }
+    let count = 0
+    nodes.forEach((t) => {
+      const v = t.nodeValue || ''
+      let idx = 0
+      const frag = document.createDocumentFragment()
+      while (true) {
+        const i = v.toLowerCase().indexOf(q, idx)
+        if (i === -1) break
+        const before = v.slice(idx, i)
+        const match = v.slice(i, i + q.length)
+        if (before) frag.appendChild(document.createTextNode(before))
+        const mark = document.createElement('mark')
+        mark.className = 'preview-match'
+        mark.textContent = match
+        frag.appendChild(mark)
+        idx = i + q.length
+        count++
+      }
+      const rest = v.slice(idx)
+      if (rest) frag.appendChild(document.createTextNode(rest))
+      if (t.parentNode) t.parentNode.replaceChild(frag, t)
+    })
+    setPreviewMatchCount(count)
+    setPreviewMatchIndex(count > 0 ? 0 : 0)
+    if (count > 0) {
+      const first = container.querySelectorAll('mark.preview-match')[0] as HTMLElement
+      if (first) {
+        first.classList.add('preview-match-active')
+        first.scrollIntoView({ block: 'center' })
+      }
+    }
+  }
+
+  const gotoPreviewMatch = (dir: 'next' | 'prev') => {
+    if (!previewRef.current || previewMatchCount === 0) return
+    const matches = Array.from(previewRef.current.querySelectorAll('mark.preview-match')) as HTMLElement[]
+    const cur = previewMatchIndex
+    const next = dir === 'next' ? (cur + 1) % matches.length : (cur - 1 + matches.length) % matches.length
+    matches[cur]?.classList.remove('preview-match-active')
+    matches[next]?.classList.add('preview-match-active')
+    matches[next]?.scrollIntoView({ block: 'center' })
+    setPreviewMatchIndex(next)
+  }
 
   useEffect(() => {
     if (preview && previewRef.current) {
@@ -315,6 +519,12 @@ export default function NotebookTab() {
     }
   }, [preview, content])
 
+  useEffect(() => {
+    if (preview && searchQuery) applyPreviewSearch()
+  }, [preview, searchQuery, content])
+
+  const defaultFilePath = getDefaultFile()
+
   return (
     <div className="h-full flex flex-col">
       <div className="border-b border-gray-200 bg-white p-3 flex items-center justify-between">
@@ -340,6 +550,35 @@ export default function NotebookTab() {
             {preview ? <Pencil className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
             <span>{preview ? '编辑' : '预览'}</span>
           </button>
+          <div className="relative">
+            <button onClick={() => setShowCreate(s => !s)} className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 flex items-center space-x-1">
+              <Plus className="w-3 h-3" />
+              <span>新建</span>
+            </button>
+            {showCreate && (
+              <div className="absolute right-0 mt-1 bg-white border border-gray-200 rounded shadow p-2 flex items-center space-x-2 z-10">
+                <input
+                  value={newNoteName}
+                  onChange={(e) => setNewNoteName(e.target.value)}
+                  placeholder="文件名.md"
+                  className="border border-gray-300 rounded px-2 py-1 text-xs w-40"
+                />
+                <button
+                  onClick={createNote}
+                  disabled={creating}
+                  className="px-2 py-1 rounded text-xs bg-green-100 text-green-700 hover:bg-green-200"
+                >
+                  {creating ? '创建中' : '创建'}
+                </button>
+                <button
+                  onClick={() => { setShowCreate(false); setNewNoteName('') }}
+                  className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200"
+                >
+                  取消
+                </button>
+              </div>
+            )}
+          </div>
           <div className="flex items-center">
             <button
               onClick={() => setTheme('light')}
@@ -356,10 +595,54 @@ export default function NotebookTab() {
               <span>深色</span>
             </button>
           </div>
+          <div className="flex items-center space-x-1">
+            <div className="flex items-center px-2 py-1 border rounded text-xs bg-white">
+              <Search className="w-3 h-3 mr-1 text-gray-500" />
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (!preview) applyEditorSearch('next')
+                    else applyPreviewSearch()
+                  }
+                }}
+                placeholder="查找"
+                className="outline-none bg-transparent text-gray-700 w-28"
+              />
+            </div>
+            <button
+              onClick={() => (!preview ? applyEditorSearch('prev') : gotoPreviewMatch('prev'))}
+              className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center"
+            >
+              <ChevronUp className="w-3 h-3" />
+            </button>
+            <button
+              onClick={() => (!preview ? applyEditorSearch('next') : gotoPreviewMatch('next'))}
+              className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center"
+            >
+              <ChevronDown className="w-3 h-3" />
+            </button>
+            <button
+              onClick={() => {
+                if (!preview) setSearch('')
+                else {
+                  clearPreviewSearch()
+                  setSearch('')
+                }
+              }}
+              className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center"
+            >
+              <X className="w-3 h-3" />
+            </button>
+            {preview && (
+              <span className="text-xs text-gray-500">{previewMatchCount > 0 ? `${previewMatchIndex + 1}/${previewMatchCount}` : '0'}</span>
+            )}
+          </div>
         </div>
       </div>
-      <div className="flex-1 flex overflow-hidden">
-        <div className="w-72 border-r border-gray-200 bg-white flex flex-col">
+      <div className="flex-1 flex overflow-hidden select-none">
+        <div className="border-r border-gray-200 bg-white flex flex-col" style={{ width: `${sidebarWidth}px` }}>
           <div className="p-2 border-b border-gray-100 flex items-center justify-between">
             <div className="text-xs text-gray-600 truncate max-w-[10rem]" title={currentDir}>{currentDir || '未设置目录'}</div>
             <button onClick={goParent} className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center space-x-1">
@@ -375,37 +658,37 @@ export default function NotebookTab() {
               <div className="p-3 text-xs text-gray-500">空目录</div>
             )}
             {!isLoading && tree.length > 0 && (
-              <ul className="p-1 space-y-1">
-                {tree.filter(e => e.isDirectory).map((e) => (
-                  <li key={e.path}>
-                    <button
-                      onClick={() => {
-                        const p = joinPath(currentDir, e.name)
-                        setCurrentDir(p)
-                        listDir(p)
-                      }}
-                      className="w-full flex items-center space-x-2 px-2 py-1 rounded text-xs text-gray-700 hover:bg-gray-100"
-                    >
-                      <FolderIcon className="w-3 h-3 text-yellow-600" />
-                      <span className="truncate">{e.name}</span>
-                    </button>
-                  </li>
-                ))}
-                {tree.filter(e => e.isFile).map((e) => (
-                  <li key={e.path}>
-                    <button
-                      onClick={() => openFile(e.path)}
-                      className="w-full flex items-center space-x-2 px-2 py-1 rounded text-xs text-gray-700 hover:bg-gray-100"
-                    >
-                      <FileText className="w-3 h-3 text-blue-600" />
-                      <span className="truncate">{e.name}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <div className="p-1">
+                {renderTree(tree, 0)}
+              </div>
             )}
           </div>
         </div>
+        <div
+          onMouseDown={(e) => {
+            resizingRef.current = true
+            startXRef.current = e.clientX
+            startWRef.current = sidebarWidth
+            document.body.style.cursor = 'col-resize'
+            const onMove = (ev: MouseEvent) => {
+              if (!resizingRef.current) return
+              const dx = ev.clientX - startXRef.current
+              let w = startWRef.current + dx
+              if (w < 180) w = 180
+              if (w > 560) w = 560
+              setSidebarWidth(w)
+            }
+            const onUp = () => {
+              resizingRef.current = false
+              document.body.style.cursor = ''
+              window.removeEventListener('mousemove', onMove)
+              window.removeEventListener('mouseup', onUp)
+            }
+            window.addEventListener('mousemove', onMove)
+            window.addEventListener('mouseup', onUp)
+          }}
+          className={`${theme === 'dark' ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'} w-1 cursor-col-resize`}
+        />
         <div className="flex-1 p-3 flex flex-col min-h-0 overflow-hidden">
           <div className="text-xs text-gray-500 mb-2">文件：{currentFile || '未选择'}</div>
           {!preview ? (

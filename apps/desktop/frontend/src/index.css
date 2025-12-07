@@ -329,6 +329,21 @@
   border-left-color: #4b5563;
 }
 
+.preview-match {
+  background-color: #fde68a;
+  color: #111827;
+}
+
+.prose-invert .preview-match {
+  background-color: #374151;
+  color: #e5e7eb;
+}
+
+.preview-match-active {
+  outline: 2px solid #f59e0b;
+  border-radius: 2px;
+}
+
 .code-block pre {
   background: transparent;
   border: none;

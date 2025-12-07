@@ -19,6 +19,12 @@
     "build:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.3.0",
+    "lucide-react": "^0.511.0",
+    "zustand": "^5.0.8",
+    "tailwind-merge": "^3.3.1",
     "clsx": "^2.1.1",
     "highlight.js": "^11.9.0",
     "markdown-it": "^14.1.0",
@@ -31,13 +37,8 @@
     "@codemirror/lang-markdown": "^6.2.4",
     "@codemirror/language-data": "^6.3.1",
     "@codemirror/theme-one-dark": "^6.1.2",
-    "@lezer/highlight": "^1.2.0",
-    "lucide-react": "^0.511.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-router-dom": "^7.3.0",
-    "tailwind-merge": "^3.3.1",
-    "zustand": "^5.0.8"
+    "@codemirror/search": "^6.5.4",
+    "@lezer/highlight": "^1.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.25.0",
