@@ -286,3 +286,90 @@
 .window-control-btn.minimize:hover {
   background-color: rgba(156, 163, 175, 0.2);
 }
+.code-block {
+  background: #282c34; /* 预览模式下代码块始终深色背景 */
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* 深色主题容器使用 prose-invert 时，代码块采用深色背景 */
+.prose-invert .code-block {
+  background: #282c34;
+}
+
+.prose-invert p,
+.prose-invert h1,
+.prose-invert h2,
+.prose-invert h3,
+.prose-invert h4,
+.prose-invert h5,
+.prose-invert h6,
+.prose-invert ul,
+.prose-invert ol,
+.prose-invert li,
+.prose-invert blockquote,
+.prose-invert table,
+.prose-invert thead,
+.prose-invert tbody,
+.prose-invert tr,
+.prose-invert th,
+.prose-invert td,
+.prose-invert hr {
+  background-color: transparent;
+}
+
+.prose-invert code:not(pre code) {
+  background-color: #111827;
+  color: #e5e7eb;
+  padding: 0 0.25rem;
+  border-radius: 4px;
+}
+
+.prose-invert blockquote {
+  border-left-color: #4b5563;
+}
+
+.code-block pre {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0; /* 由 code.hljs 控制内边距 */
+  margin: 0; /* 取消默认上下外边距，滚动条贴底 */
+  width: 100%;
+}
+
+/* 覆盖 Typography 默认浅色背景，交由 hljs 主题呈现暗色背景 */
+.prose pre {
+  background: transparent;
+  padding: 0;
+}
+
+.prose pre code.hljs {
+  display: block;
+  border-radius: 0;
+  padding: 0.75rem 1rem;
+  background: transparent !important; /* 背景交由容器控制，避免双层背景 */
+}
+
+.prose pre {
+  margin: 0; /* 禁止 Typography 插件为 pre 添加上下外边距 */
+}
+
+.prose pre code {
+  font-size: 0.85rem;
+}
+
+/* 交由 highlight.js 主题控制背景与前景色，避免覆盖 */
+
+.cm-editor {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.cm-editor .cm-scroller {
+  padding: 0.75rem 1rem;
+}
+
+.dark .cm-editor {
+  border-color: #374151;
+}
