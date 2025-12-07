@@ -23,6 +23,8 @@ export default function NotebookTab() {
   const listDirRaw = useNoteFilesStore(s => s.listDirRaw)
   const readFile = useNoteFilesStore(s => s.readFile)
   const writeFile = useNoteFilesStore(s => s.writeFile)
+  const appendToFile = useNoteFilesStore(s => s.appendToFile)
+  const saveImageToAttachments = useNoteFilesStore(s => s.saveImageToAttachments)
   const setDefaultDir = useNoteFilesStore(s => s.setDefaultDir)
   const setDefaultFile = useNoteFilesStore(s => s.setDefaultFile)
   const getDefaultDir = useNoteFilesStore(s => s.getDefaultDir)
@@ -131,12 +133,9 @@ export default function NotebookTab() {
 
   const openFile = async (path: string) => {
     try {
-      const ok = await setDefaultFile(path)
-      if (ok) {
-        setCurrentFile(path)
-        const text = await readFile(path)
-        setContent(text || '')
-      }
+      setCurrentFile(path)
+      const text = await readFile(path)
+      setContent(text || '')
     } catch (e) {
       useToastStore.getState().showError('打开失败', e instanceof Error ? e.message : '未知错误')
     }
@@ -190,9 +189,9 @@ export default function NotebookTab() {
       <ul className="space-y-1">
         {entries.filter(e => e.isDirectory).map((e) => (
           <li key={e.path}>
-            <div className="w-full flex items-center space-x-2 px-2 py-1 rounded text-xs text-gray-700 hover:bg-gray-100" style={{ paddingLeft: pad }}>
+            <div className={`w-full flex items-center space-x-2 px-2 py-1 rounded text-xs ${e.path === currentDir ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-100'}`} style={{ paddingLeft: pad }}>
               <button onClick={() => toggleExpand(e.path)} className="flex items-center">
-                {expanded[e.path] ? <ChevronDown className="w-3 h-3 text-gray-500" /> : <ChevronRight className="w-3 h-3 text-gray-500" />}
+                {expanded[e.path] ? <ChevronDown className={`w-3 h-3 ${e.path === currentDir ? 'text-blue-600' : 'text-gray-500'}`} /> : <ChevronRight className={`w-3 h-3 ${e.path === currentDir ? 'text-blue-600' : 'text-gray-500'}`} />}
               </button>
               <button
                 onClick={() => {
@@ -201,7 +200,7 @@ export default function NotebookTab() {
                 }}
                 className="flex items-center space-x-2 flex-1 text-left"
               >
-                <FolderIcon className="w-3 h-3 text-yellow-600" />
+                <FolderIcon className={`w-3 h-3 ${e.path === currentDir ? 'text-blue-600' : 'text-yellow-600'}`} />
                 <span className="truncate">{e.name}</span>
               </button>
             </div>
@@ -212,10 +211,10 @@ export default function NotebookTab() {
           <li key={e.path}>
             <button
               onClick={() => openFile(e.path)}
-              className="w-full flex items-center space-x-2 px-2 py-1 rounded text-xs text-gray-700 hover:bg-gray-100"
+              className={`w-full flex items-center space-x-2 px-2 py-1 rounded text-xs ${e.path === currentFile ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-100'}`}
               style={{ paddingLeft: pad }}
             >
-              <FileText className="w-3 h-3 text-blue-600" />
+              <FileText className={`w-3 h-3 ${e.path === currentFile ? 'text-blue-600' : 'text-blue-600'}`} />
               <span className="truncate flex-1 text-left">{e.name}</span>
               {e.path === defaultFilePath && (
                 <Star className="w-3 h-3 text-yellow-500" />
@@ -301,6 +300,92 @@ export default function NotebookTab() {
     }
   }
 
+  const blobToDataUrl = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(new Error('read-error'))
+      reader.readAsDataURL(blob)
+    })
+  }
+
+  const extractImageBlobs = (e: any): Blob[] => {
+    try {
+      const dt: any = (e && (e as any).clipboardData) || (e && e.clipboardData)
+      if (!dt) return []
+      const items = dt.items || []
+      const blobs: Blob[] = []
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i]
+        if (it && typeof it.type === 'string' && it.type.startsWith('image/')) {
+          const f = typeof it.getAsFile === 'function' ? it.getAsFile() : null
+          if (f) blobs.push(f)
+        }
+      }
+      return blobs
+    } catch {
+      return []
+    }
+  }
+
+  const handlePastedBlobs = async (blobs: Blob[], view?: EditorView) => {
+    try {
+      if (blobs.length === 0) return
+      const baseDir = currentFile ? parentPath(currentFile) : (currentDir || getDefaultDir())
+      if (!baseDir) return
+      let inserted = 0
+      const inElectron = !!(window as any).electronAPI
+      for (const blob of blobs) {
+        const dataUrl = await blobToDataUrl(blob)
+        if (inElectron) {
+          const base = currentFile ? (currentFile.split(sepOf(currentFile)).pop() || '').replace(/\.md$/i, '') : ''
+          const rel = await saveImageToAttachments(baseDir, blob, base)
+          if (!rel) {
+            useToastStore.getState().showError('保存失败', '附件写入失败')
+            continue
+          }
+          const mdImg = `\n\n![](${rel})\n`
+          if (view) {
+            const pos = view.state.selection.main.head
+            view.dispatch({ changes: { from: pos, to: pos, insert: mdImg } })
+            setContent(view.state.doc.toString())
+          } else if (currentFile) {
+            await appendToFile(currentFile, mdImg)
+            setContent((prev) => prev + mdImg)
+          } else {
+            setContent((prev) => prev + mdImg)
+          }
+          inserted++
+        } else {
+          const mdImg = `\n\n![](${dataUrl})\n`
+          if (view) {
+            const pos = view.state.selection.main.head
+            view.dispatch({ changes: { from: pos, to: pos, insert: mdImg } })
+            setContent(view.state.doc.toString())
+          } else {
+            setContent((prev) => prev + mdImg)
+          }
+          inserted++
+        }
+      }
+      if (inserted > 0 && inElectron) {
+        await listDir(baseDir)
+      }
+      if (inserted > 0) {
+        useToastStore.getState().showSuccess('已粘贴图片', `已插入 ${inserted} 张图片${inElectron ? '（保存到 attachments）' : '（以 data URL 方式）'}`)
+      }
+    } catch (err) {
+      useToastStore.getState().showError('粘贴失败', err instanceof Error ? err.message : '未知错误')
+    }
+  }
+
+  const handlePaste = async (e: any) => {
+    const blobs = extractImageBlobs(e)
+    if (blobs.length === 0) return
+    e.preventDefault()
+    await handlePastedBlobs(blobs)
+  }
+
   const createMd = () => {
     const md = new MarkdownIt({
       html: false,
@@ -325,7 +410,12 @@ export default function NotebookTab() {
       const i = tokens[idx].attrIndex('src')
       if (i >= 0) {
         const src = tokens[idx].attrs![i][1]
-        tokens[idx].attrs![i][1] = safeSrc(src)
+        const sanitized = safeSrc(src)
+        tokens[idx].attrs![i][1] = sanitized
+        if (src.startsWith('attachments/') || src.startsWith('./') || src.startsWith('../')) {
+          tokens[idx].attrPush(['data-xpaste-local', 'true'])
+          tokens[idx].attrPush(['data-xpaste-src', src])
+        }
       }
       return self.renderToken(tokens, idx, options)
     }
@@ -334,7 +424,62 @@ export default function NotebookTab() {
 
   useEffect(() => {
     mdRef.current = createMd()
-  }, [])
+  }, [currentDir, currentFile])
+
+  useEffect(() => {
+    const inElectron = !!(window as any).electronAPI
+    if (!inElectron) return
+    if (!preview || !previewRef.current) return
+    const baseDir = currentFile ? parentPath(currentFile) : (currentDir || getDefaultDir())
+    if (!baseDir) return
+    const imgs = Array.from(previewRef.current.querySelectorAll('img[data-xpaste-local="true"]')) as HTMLImageElement[]
+    const guessType = (p: string) => {
+      const lower = p.toLowerCase()
+      if (lower.endsWith('.png')) return 'image/png'
+      if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
+      if (lower.endsWith('.webp')) return 'image/webp'
+      if (lower.endsWith('.gif')) return 'image/gif'
+      return 'image/png'
+    }
+    const loadAll = async () => {
+      for (const img of imgs) {
+        const rel = img.getAttribute('data-xpaste-src') || ''
+        if (!rel) continue
+        const abs = joinPath(baseDir, rel)
+        try {
+          let ok = false
+          if (typeof window.electronAPI.readBytesFile === 'function') {
+            const res = await window.electronAPI.readBytesFile(abs)
+            if (res && res.success && res.data) {
+              const blob = new Blob([res.data], { type: guessType(rel) })
+              const url = URL.createObjectURL(blob)
+              img.src = url
+              ok = true
+            }
+          }
+          if (!ok && typeof window.electronAPI.readDataUrlFile === 'function') {
+            const res2 = await window.electronAPI.readDataUrlFile(abs)
+            if (res2 && res2.success && res2.data) {
+              img.src = res2.data
+              ok = true
+            }
+          }
+          if (!ok) img.alt = '图片加载失败'
+        } catch {
+          img.alt = '图片加载失败'
+        }
+      }
+    }
+    loadAll()
+  }, [preview, content, currentDir, currentFile])
+
+  useEffect(() => {
+    if (!preview) return
+    window.addEventListener('paste', handlePaste)
+    return () => {
+      window.removeEventListener('paste', handlePaste)
+    }
+  }, [preview, currentDir, currentFile])
 
   const mdStyle = useMemo(() => {
     return HighlightStyle.define([
@@ -355,6 +500,15 @@ export default function NotebookTab() {
       const extensions = [
         markdown({ base: markdownLanguage, codeLanguages: languages }),
         highlightSelectionMatches(),
+        EditorView.domEventHandlers({
+          paste: (event, view) => {
+            const blobs = extractImageBlobs(event)
+            if (blobs.length === 0) return false
+            event.preventDefault()
+            handlePastedBlobs(blobs, view)
+            return true
+          },
+        }),
         syntaxHighlighting(mdStyle, { fallback: true }),
         EditorView.lineWrapping,
         EditorView.updateListener.of((v) => {
@@ -704,6 +858,12 @@ export default function NotebookTab() {
                 className={`w-full h-full min-h-0 border rounded p-3 prose prose-sm max-w-none ${theme === 'dark' ? 'border-gray-700 bg-gray-900 text-gray-100 prose-invert' : 'border-gray-200 bg-white text-gray-900'}`}
                 dangerouslySetInnerHTML={{ __html: (mdRef.current?.render(content || '')) || '' }}
                 ref={previewRef}
+                onPaste={(e) => {
+                  const blobs = extractImageBlobs(e)
+                  if (blobs.length === 0) return
+                  e.preventDefault()
+                  handlePastedBlobs(blobs)
+                }}
               />
             </div>
           )}

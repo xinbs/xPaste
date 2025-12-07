@@ -27,7 +27,7 @@ interface NoteFilesState {
   ensureDir: (dirPath: string) => Promise<boolean>
   deletePath: (targetPath: string) => Promise<boolean>
   renamePath: (fromPath: string, toPath: string) => Promise<boolean>
-  saveImageToAttachments: (baseDir: string, dataUrl: string, suggestedName?: string) => Promise<string | null>
+  saveImageToAttachments: (baseDir: string, data: string | Blob, suggestedName?: string) => Promise<string | null>
   getDefaultDir: () => string
   setDefaultDir: (dirPath: string) => Promise<boolean>
   getDefaultFile: () => string
@@ -51,6 +51,10 @@ function nowStamp() {
   const mm = pad(d.getMinutes())
   const ss = pad(d.getSeconds())
   return `${y}${m}${dd}-${hh}${mm}${ss}`
+}
+
+function sanitizeBase(name: string) {
+  return name.replace(/[<>:"/\\|?*\n\r\t]/g, '').replace(/\s+/g, '_')
 }
 
 export const useNoteFilesStore = create<NoteFilesState>()((set, get) => ({
@@ -142,13 +146,32 @@ export const useNoteFilesStore = create<NoteFilesState>()((set, get) => ({
     }
   },
 
-  saveImageToAttachments: async (baseDir: string, dataUrl: string, suggestedName?: string) => {
+  saveImageToAttachments: async (baseDir: string, data: string | Blob, suggestedName?: string) => {
     try {
       const attachDir = joinPath(baseDir, 'attachments')
       await get().ensureDir(attachDir)
-      const ext = (dataUrl.startsWith('data:image/') ? dataUrl.split(';')[0].split('/')[1] : 'png') || 'png'
-      const name = suggestedName && suggestedName.trim().length > 0 ? suggestedName : `${nowStamp}.${ext}`
+      const ext = (typeof data !== 'string'
+        ? ((data as Blob).type && (data as Blob).type.startsWith('image/') ? (data as Blob).type.split('/')[1] : 'png')
+        : (data.startsWith('data:image/') ? data.split(';')[0].split('/')[1] : 'png')) || 'png'
+      const base = suggestedName && suggestedName.trim().length > 0 ? sanitizeBase(suggestedName.trim()) : ''
+      const name = base ? `${base}-${nowStamp()}.${ext}` : `${nowStamp()}.${ext}`
       const filePath = joinPath(attachDir, name)
+      if (typeof data !== 'string' && window.electronAPI?.saveBytesFile) {
+        const ab = await (data as Blob).arrayBuffer()
+        const bytes = new Uint8Array(ab)
+        const res = await window.electronAPI.saveBytesFile(filePath, bytes)
+        if (res && res.success) {
+          const rel = `attachments/${name}`
+          return rel
+        }
+        return null
+      }
+      const dataUrl = typeof data === 'string' ? data : await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(new Error('read-error'))
+        reader.readAsDataURL(data as Blob)
+      })
       const res = await window.electronAPI.saveBase64File(filePath, dataUrl)
       if (res && res.success) {
         const rel = `attachments/${name}`
@@ -228,7 +251,9 @@ export const useNoteFilesStore = create<NoteFilesState>()((set, get) => ({
       } else if (item.type === 'image' && item.content) {
         const dir = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_DEFAULT_DIR, '')
         if (!dir) return false
-        const rel = await get().saveImageToAttachments(dir, item.content)
+        const filePath = get().getDefaultFile()
+        const base = filePath ? filePath.split(filePath.includes('\\') ? '\\' : '/').pop()?.replace(/\.md$/i, '') || '' : ''
+        const rel = await get().saveImageToAttachments(dir, item.content, base)
         if (!rel) return false
         content = `\n\n${ts}\n\n![](${rel})\n`
       } else {

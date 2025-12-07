@@ -80,5 +80,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deletePath: (targetPath) => ipcRenderer.invoke('fs-delete', targetPath),
   renamePath: (fromPath, toPath) => ipcRenderer.invoke('fs-rename', fromPath, toPath),
   saveBase64File: (filePath, base64DataUrl) => ipcRenderer.invoke('fs-save-base64', filePath, base64DataUrl),
+  saveBytesFile: (filePath, bytes) => ipcRenderer.invoke('fs-save-bytes', filePath, bytes),
+  readBytesFile: (filePath) => ipcRenderer.invoke('fs-read-bytes', filePath),
+  readDataUrlFile: (filePath) => ipcRenderer.invoke('fs-read-dataurl', filePath),
   existsPath: (targetPath) => ipcRenderer.invoke('fs-exists', targetPath),
 });

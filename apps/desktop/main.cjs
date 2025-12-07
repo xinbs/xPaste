@@ -1381,16 +1381,67 @@ ipcMain.handle('fs-rename', async (event, fromPath, toPath) => {
 
 ipcMain.handle('fs-save-base64', async (event, filePath, base64DataUrl) => {
   try {
+    try { fs.mkdirSync(path.dirname(filePath), { recursive: true }) } catch {}
     let data = base64DataUrl;
     const idx = typeof data === 'string' ? data.indexOf(',') : -1;
     if (idx >= 0) {
       data = data.slice(idx + 1);
     }
+    if (typeof data === 'string') {
+      data = data.replace(/\s+/g, '');
+    }
     const buf = Buffer.from(data, 'base64');
+    console.log('[fs-save-base64] writing', filePath, 'bytes:', buf.length);
     fs.writeFileSync(filePath, buf);
+    const ok = fs.existsSync(filePath);
+    if (!ok) return { success: false, error: 'file-not-exists-after-save' };
+    console.log('[fs-save-base64] saved ok:', filePath);
     return { success: true };
   } catch (err) {
+    console.error('[fs-save-base64] error:', err);
     return { success: false, error: err?.message || 'save failed' };
+  }
+});
+
+ipcMain.handle('fs-save-bytes', async (event, filePath, bytes) => {
+  try {
+    try { fs.mkdirSync(path.dirname(filePath), { recursive: true }) } catch {}
+    const buf = Buffer.from(bytes);
+    console.log('[fs-save-bytes] writing', filePath, 'bytes:', buf.length);
+    fs.writeFileSync(filePath, buf);
+    const ok = fs.existsSync(filePath);
+    if (!ok) return { success: false, error: 'file-not-exists-after-save' };
+    console.log('[fs-save-bytes] saved ok:', filePath);
+    return { success: true };
+  } catch (err) {
+    console.error('[fs-save-bytes] error:', err);
+    return { success: false, error: err?.message || 'save failed' };
+  }
+});
+
+ipcMain.handle('fs-read-bytes', async (event, filePath) => {
+  try {
+    const buf = fs.readFileSync(filePath);
+    return { success: true, data: buf };
+  } catch (err) {
+    return { success: false, error: err?.message || 'read failed' };
+  }
+});
+
+ipcMain.handle('fs-read-dataurl', async (event, filePath) => {
+  try {
+    const buf = fs.readFileSync(filePath);
+    const ext = (path.extname(filePath) || '.png').toLowerCase();
+    const mime = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+      : ext === '.png' ? 'image/png'
+      : ext === '.gif' ? 'image/gif'
+      : ext === '.webp' ? 'image/webp'
+      : 'application/octet-stream';
+    const b64 = buf.toString('base64');
+    const dataUrl = `data:${mime};base64,${b64}`;
+    return { success: true, data: dataUrl };
+  } catch (err) {
+    return { success: false, error: err?.message || 'read failed' };
   }
 });
 

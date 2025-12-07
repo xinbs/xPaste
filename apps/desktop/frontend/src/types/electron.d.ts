@@ -52,6 +52,9 @@ export interface ElectronAPI {
   deletePath: (targetPath: string) => Promise<{ success: boolean; error?: string }>;
   renamePath: (fromPath: string, toPath: string) => Promise<{ success: boolean; error?: string }>;
   saveBase64File: (filePath: string, base64DataUrl: string) => Promise<{ success: boolean; error?: string }>;
+  saveBytesFile: (filePath: string, bytes: Uint8Array) => Promise<{ success: boolean; error?: string }>;
+  readBytesFile: (filePath: string) => Promise<{ success: boolean; data?: Uint8Array; error?: string }>;
+  readDataUrlFile: (filePath: string) => Promise<{ success: boolean; data?: string; error?: string }>;
   existsPath: (targetPath: string) => Promise<{ success: boolean; data?: boolean; error?: string }>;
 }
 
