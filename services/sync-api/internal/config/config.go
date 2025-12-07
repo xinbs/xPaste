@@ -139,7 +139,7 @@ func Load() (*Config, error) {
 			Compress:   getEnvAsBool("LOG_COMPRESS", true),
 		},
 		Upload: UploadConfig{
-			MaxFileSize:    getEnvAsInt64("UPLOAD_MAX_FILE_SIZE", 10*1024*1024), // 10MB
+            MaxFileSize:    getEnvAsInt64("UPLOAD_MAX_FILE_SIZE", 50*1024*1024), // 50MB
 			AllowedTypes:   getEnvAsSlice("UPLOAD_ALLOWED_TYPES", []string{"image/jpeg", "image/png", "image/gif", "image/webp"}),
 			UploadPath:     getEnv("UPLOAD_PATH", "./uploads"),
 			URLPrefix:      getEnv("UPLOAD_URL_PREFIX", "/uploads"),

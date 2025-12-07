@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { useSettingsStore, SETTING_KEYS } from './settings'
+import apiClient from '@/lib/api'
 
 type DirEntry = {
   name: string
@@ -33,12 +34,66 @@ interface NoteFilesState {
   getDefaultFile: () => string
   setDefaultFile: (filePath: string) => Promise<boolean>
   saveClipboardItemToDefaultMd: (item: ClipboardItem) => Promise<boolean>
+  syncNoteFile: (filePath: string, rootDir?: string) => Promise<boolean>
+  syncAllNotes: (rootDir?: string) => Promise<{ pushed: number; failed: number }>
+  syncAttachmentsForDir: (dir: string, rootDir?: string) => Promise<{ uploaded: number; failed: number }>
+  syncAllAttachments: (rootDir?: string) => Promise<{ uploaded: number; failed: number }>
 }
 
+function escapeRe(s: string) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
 function joinPath(a: string, b: string) {
   if (!a) return b
   const sep = a.includes('\\') ? '\\' : '/'
-  return a.replace(new RegExp(`${sep}$`), '') + sep + b
+  const esc = escapeRe(sep)
+  return a.replace(new RegExp(`${esc}$`), '') + sep + b
+}
+function sepOf(p: string) { return p.includes('\\') ? '\\' : '/' }
+function relativeDir(root: string, dir: string) {
+  if (!root || !dir) return ''
+  const rs = sepOf(root)
+  const ds = sepOf(dir)
+  const norm = (p: string, s: string) => {
+    const esc = escapeRe(s)
+    return p.replace(new RegExp(`${esc}+`, 'g'), s).replace(new RegExp(`${esc}$`), '')
+  }
+  const R = norm(root, rs)
+  const D = norm(dir, ds)
+  if (D.startsWith(R)) {
+    const rel = D.slice(R.length)
+    const esc = escapeRe(ds)
+    return rel.replace(new RegExp(`^${esc}`), '')
+  }
+  return ''
+}
+function toUnix(p: string) { return p.replace(/\\/g, '/') }
+function guessMimeFromName(name: string) {
+  const lower = name.toLowerCase()
+  if (lower.endsWith('.png')) return 'image/png'
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
+  if (lower.endsWith('.webp')) return 'image/webp'
+  if (lower.endsWith('.gif')) return 'image/gif'
+  return 'application/octet-stream'
+}
+
+function simpleHashString(s: string) {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h) + s.charCodeAt(i)
+  return String(h >>> 0)
+}
+
+function loadSyncIndex() {
+  try {
+    const raw = localStorage.getItem('xpaste-sync-index')
+    if (!raw) return { notes: {}, attachments: {} } as { notes: Record<string, string>; attachments: Record<string, string> }
+    const obj = JSON.parse(raw)
+    return { notes: obj.notes || {}, attachments: obj.attachments || {} } as { notes: Record<string, string>; attachments: Record<string, string> }
+  } catch {
+    return { notes: {}, attachments: {} } as { notes: Record<string, string>; attachments: Record<string, string> }
+  }
+}
+
+function saveSyncIndex(idx: { notes: Record<string, string>; attachments: Record<string, string> }) {
+  try { localStorage.setItem('xpaste-sync-index', JSON.stringify(idx)) } catch {}
 }
 
 function nowStamp() {
@@ -256,6 +311,25 @@ export const useNoteFilesStore = create<NoteFilesState>()((set, get) => ({
         const rel = await get().saveImageToAttachments(dir, item.content, base)
         if (!rel) return false
         content = `\n\n${ts}\n\n![](${rel})\n`
+
+        try {
+          const syncEnabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+          if (syncEnabled && typeof window.electronAPI.readBytesFile === 'function') {
+            const abs = joinPath(dir, rel)
+            const read = await window.electronAPI.readBytesFile(abs)
+            if (read && read.success && read.data) {
+              const fileName = rel.split('/').pop() || `image-${Date.now()}.png`
+              const noteDir = ''
+              const pathRel = 'attachments'
+              const typeGuess = (fileName.toLowerCase().endsWith('.jpg') || fileName.toLowerCase().endsWith('.jpeg')) ? 'image/jpeg'
+                : fileName.toLowerCase().endsWith('.png') ? 'image/png'
+                : fileName.toLowerCase().endsWith('.webp') ? 'image/webp'
+                : 'application/octet-stream'
+              const blobU = new Blob([read.data], { type: typeGuess })
+              await apiClient.uploadNotebookAttachment(blobU, { filename: fileName, noteDir, pathRel, useData: true })
+            }
+          }
+        } catch {}
       } else {
         return false
       }
@@ -263,6 +337,157 @@ export const useNoteFilesStore = create<NoteFilesState>()((set, get) => ({
       return ok
     } catch {
       return false
+    }
+  },
+
+  syncNoteFile: async (filePath: string, rootDir?: string) => {
+    try {
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+      if (!enabled) return false
+      const content = await get().readFile(filePath)
+      if (content === null) return false
+      const dir = filePath.split(sepOf(filePath)).slice(0, -1).join(sepOf(filePath))
+      const root = rootDir || get().getDefaultDir()
+      const noteDir = relativeDir(root, dir)
+      const fileName = filePath.split(sepOf(filePath)).pop() || 'note.md'
+      const key = toUnix(noteDir ? `${noteDir}/${fileName}` : fileName)
+      const idx = loadSyncIndex()
+      const hash = simpleHashString(content)
+      if (idx.notes[key] === hash) return true
+      const res = await apiClient.pushNotebookNote(content, { filename: fileName, noteDir, useData: true })
+      if (res && res.success) {
+        idx.notes[key] = hash
+        saveSyncIndex(idx)
+        return true
+      }
+      return false
+    } catch {
+      return false
+    }
+  },
+
+  syncAllNotes: async (rootDir?: string) => {
+    try {
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+      if (!enabled) return { pushed: 0, failed: 0 }
+      const root = rootDir || get().getDefaultDir()
+      if (!root) return { pushed: 0, failed: 0 }
+      const walk = async (dir: string, acc: string[]): Promise<string[]> => {
+        const entries = await get().listDirRaw(dir)
+        const files = entries.filter(e => e.isFile && e.name.toLowerCase().endsWith('.md')).map(e => e.path)
+        const subdirs = entries.filter(e => e.isDirectory).map(e => e.path)
+        acc.push(...files)
+        for (const sd of subdirs) {
+          await walk(sd, acc)
+        }
+        return acc
+      }
+      const allFiles = await walk(root, [])
+      const idx = loadSyncIndex()
+      const items: { content: string; filename: string; note_dir?: string; use_data?: boolean }[] = []
+      const keyHashMap: Record<string, string> = {}
+      for (const fp of allFiles) {
+        const content = await get().readFile(fp)
+        if (content === null) continue
+        const dir = fp.split(sepOf(fp)).slice(0, -1).join(sepOf(fp))
+        const noteDir = relativeDir(root, dir)
+        const fileName = fp.split(sepOf(fp)).pop() || 'note.md'
+        const key = toUnix(noteDir ? `${noteDir}/${fileName}` : fileName)
+        const hash = simpleHashString(content)
+        if (idx.notes[key] !== hash) {
+          items.push({ content, filename: fileName, note_dir: noteDir || '', use_data: true })
+          keyHashMap[key] = hash
+        }
+      }
+      if (items.length === 0) return { pushed: 0, failed: 0 }
+      const res = await apiClient.pushNotebookNotesBatch(items)
+      const results = (res && res.success && res.data && Array.isArray(res.data.results)) ? res.data.results as any[] : []
+      const pushed = results.filter(r => r && r.success).length
+      const failed = results.length > 0 ? results.filter(r => r && !r.success).length : 0
+      if (pushed > 0) {
+        for (const r of results) {
+          if (r && r.success) {
+            const key = toUnix(r.NoteDir ? `${r.NoteDir}/${r.FileName}` : r.FileName)
+            const h = keyHashMap[key]
+            if (h) idx.notes[key] = h
+          }
+        }
+        saveSyncIndex(idx)
+      }
+      return { pushed, failed }
+    } catch {
+      return { pushed: 0, failed: 0 }
+    }
+  },
+
+  syncAttachmentsForDir: async (dir: string, rootDir?: string) => {
+    try {
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+      if (!enabled) return { uploaded: 0, failed: 0 }
+      const root = rootDir || get().getDefaultDir()
+      const noteDir = relativeDir(root, dir)
+      const attRoot = joinPath(dir, 'attachments')
+      const exists = await get().listDirRaw(attRoot)
+      if (!exists || exists.length === 0) return { uploaded: 0, failed: 0 }
+
+      const collect = async (d: string, acc: string[]): Promise<string[]> => {
+        const ents = await get().listDirRaw(d)
+        for (const e of ents) {
+          if (e.isFile) acc.push(e.path)
+          else if (e.isDirectory) await collect(e.path, acc)
+        }
+        return acc
+      }
+      const files = await collect(attRoot, [])
+      let uploaded = 0
+      let failed = 0
+      for (const abs of files) {
+        try {
+          const read = await window.electronAPI.readBytesFile(abs)
+          if (!read || !read.success || !read.data) { failed++; continue }
+          const fileName = abs.split(sepOf(abs)).pop() || `file-${Date.now()}`
+          const relWithin = toUnix(abs).slice(toUnix(attRoot).length).replace(/^\//, '')
+          const relDirWithin = relWithin.split('/').slice(0, -1).join('/')
+          const pathRel = relDirWithin ? `attachments/${relDirWithin}` : 'attachments'
+          const blobU = new Blob([read.data], { type: guessMimeFromName(fileName) })
+          await apiClient.uploadNotebookAttachment(blobU, { filename: fileName, noteDir, pathRel, useData: true })
+          uploaded++
+        } catch {
+          failed++
+        }
+      }
+      return { uploaded, failed }
+    } catch {
+      return { uploaded: 0, failed: 0 }
+    }
+  },
+
+  syncAllAttachments: async (rootDir?: string) => {
+    try {
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+      if (!enabled) return { uploaded: 0, failed: 0 }
+      const root = rootDir || get().getDefaultDir()
+      if (!root) return { uploaded: 0, failed: 0 }
+      const walkDirs = async (d: string, acc: string[]): Promise<string[]> => {
+        const ents = await get().listDirRaw(d)
+        acc.push(d)
+        const subs = ents.filter(e => e.isDirectory).map(e => e.path)
+        for (const sd of subs) {
+          await walkDirs(sd, acc)
+        }
+        return acc
+      }
+      const allDirs = await walkDirs(root, [])
+      let uploaded = 0
+      let failed = 0
+      for (const d of allDirs) {
+        const r = await get().syncAttachmentsForDir(d, root)
+        uploaded += r.uploaded
+        failed += r.failed
+      }
+      return { uploaded, failed }
+    } catch {
+      return { uploaded: 0, failed: 0 }
     }
   },
 }))

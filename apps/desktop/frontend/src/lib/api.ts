@@ -367,6 +367,89 @@ class ApiClient {
     return response.json();
   }
 
+  async uploadNotebookAttachment(blob: Blob, opts: { filename: string; noteDir?: string; pathRel?: string; useData?: boolean; subdir?: string }) {
+    const formData = new FormData();
+    formData.append('file', blob, opts.filename);
+    if (opts.filename) formData.append('filename', opts.filename);
+    if (opts.noteDir) formData.append('note_dir', opts.noteDir);
+    if (opts.pathRel) formData.append('path_rel', opts.pathRel);
+    if (opts.subdir) formData.append('subdir', opts.subdir);
+
+    const params = new URLSearchParams();
+    if (opts.useData) params.set('use_data', 'true');
+    const url = `${this.getBaseURL()}/uploads/file${params.toString() ? `?${params.toString()}` : ''}`;
+    const headers: HeadersInit = {};
+    if (this.token) {
+      (headers as Record<string, string>).Authorization = `Bearer ${this.token}`;
+    }
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async pushNotebookNote(content: string, opts: { filename: string; noteDir?: string; useData?: boolean }) {
+    const body = {
+      content,
+      filename: opts.filename,
+      note_dir: opts.noteDir || '',
+      use_data: !!opts.useData,
+    } as any;
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: any;
+    }>(`/notes/push`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async pushNotebookNotesBatch(items: { content: string; filename: string; note_dir?: string; use_data?: boolean }[]) {
+    const body = { items } as any;
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: any;
+    }>(`/notes/push-batch`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async listNotebookNotes(opts: { noteDir?: string; useData?: boolean }) {
+    const params = new URLSearchParams();
+    if (opts.noteDir) params.set('note_dir', opts.noteDir);
+    if (opts.useData) params.set('use_data', 'true');
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: { items: string[]; count: number };
+    }>(`/notes/list${params.toString() ? `?${params.toString()}` : ''}`, {
+      method: 'GET',
+    });
+  }
+
+  async getNotebookNote(opts: { filename: string; noteDir?: string; useData?: boolean }) {
+    const params = new URLSearchParams();
+    params.set('filename', opts.filename);
+    if (opts.noteDir) params.set('note_dir', opts.noteDir);
+    if (opts.useData) params.set('use_data', 'true');
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: { content: string; filename: string; note_dir: string };
+    }>(`/notes/get?${params.toString()}`, {
+      method: 'GET',
+    });
+  }
+
   // 健康检查
   async healthCheck() {
     return this.request<{

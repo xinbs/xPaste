@@ -26,6 +26,9 @@ export const SETTING_KEYS = {
   NOTEBOOK_DEFAULT_DIR: 'notebook.default_dir',
   NOTEBOOK_DEFAULT_FILE: 'notebook.default_file',
   NOTEBOOK_SYNC_ENABLED: 'notebook.sync_enabled',
+  NOTEBOOK_AUTO_SYNC_ON_REFRESH: 'notebook.auto_sync_on_refresh',
+  NOTEBOOK_AUTO_SYNC_NOTES: 'notebook.auto_sync_notes',
+  NOTEBOOK_AUTO_SYNC_ATTACHMENTS: 'notebook.auto_sync_attachments',
 } as const;
 
 // 设置分组
@@ -108,26 +111,43 @@ export const useSettingsStore = create<SettingsState>()((
         });
         if (!setting) return defaultValue;
         
-        // 根据类型转换值
+        // 根据类型转换值（健壮处理布尔字符串、数字字符串等）
+        const parseBool = (val: any) => {
+          if (typeof val === 'boolean') return val;
+          if (typeof val === 'number') return val !== 0;
+          if (typeof val === 'string') {
+            const v = val.trim().toLowerCase();
+            if (v === 'true' || v === '1' || v === 'yes' || v === 'on') return true;
+            if (v === 'false' || v === '0' || v === 'no' || v === 'off' || v === '') return false;
+            try { const j = JSON.parse(v); if (typeof j === 'boolean') return j; } catch {}
+          }
+          return !!val;
+        };
+
         let convertedValue;
-        switch (setting.type) {
-          case 'boolean':
-            convertedValue = setting.value === 'true';
-            break;
-          case 'number':
-            convertedValue = Number(setting.value);
-            break;
-          case 'json':
-          case 'array':
-          case 'object':
-            try {
-              convertedValue = JSON.parse(setting.value);
-            } catch {
-              convertedValue = defaultValue;
-            }
-            break;
-          default:
-            convertedValue = setting.value;
+        const raw = setting.value;
+        const type = setting.type;
+        if (type === 'boolean') {
+          convertedValue = parseBool(raw);
+        } else if (type === 'number') {
+          const n = Number(raw);
+          convertedValue = Number.isNaN(n) ? defaultValue : n;
+        } else if (type === 'json' || type === 'array' || type === 'object') {
+          try {
+            convertedValue = JSON.parse(raw);
+          } catch {
+            convertedValue = defaultValue;
+          }
+        } else {
+          // 类型标注不准确时，按默认值类型尽量转换
+          if (typeof defaultValue === 'boolean') {
+            convertedValue = parseBool(raw);
+          } else if (typeof defaultValue === 'number') {
+            const n2 = Number(raw);
+            convertedValue = Number.isNaN(n2) ? defaultValue : n2;
+          } else {
+            convertedValue = raw;
+          }
         }
         console.log(`设置 ${key} 转换后的值:`, convertedValue);
         return convertedValue;

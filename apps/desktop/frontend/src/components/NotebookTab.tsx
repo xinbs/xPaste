@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef, useMemo } from 'react'
 import { useNoteFilesStore } from '@/store/noteFiles'
+import { useSettingsStore, SETTING_KEYS } from '@/store/settings'
+import apiClient from '@/lib/api'
 import { useToastStore } from '@/store/toast'
 import { FileText, FolderOpen, Save, RefreshCw, ArrowLeft, Folder as FolderIcon, Eye, Pencil, Sun, Moon, Search, ChevronUp, ChevronDown, ChevronRight, X, Plus, Star } from 'lucide-react'
 import hljs from 'highlight.js'
@@ -43,8 +45,14 @@ export default function NotebookTab() {
   const [showCreate, setShowCreate] = useState(false)
   const [newNoteName, setNewNoteName] = useState('')
   const [creating, setCreating] = useState(false)
+  const [showSyncMenu, setShowSyncMenu] = useState(false)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [childrenMap, setChildrenMap] = useState<Record<string, { entries: { name: string; path: string; isDirectory: boolean; isFile: boolean }[] }>>({})
+
+  const syncEnabledSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false))
+  const autoOnRefreshSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_REFRESH, true))
+  const autoNotesSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, true))
+  const autoAttSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, false))
   const resizingRef = useRef(false)
   const startXRef = useRef(0)
   const startWRef = useRef(288)
@@ -64,11 +72,100 @@ export default function NotebookTab() {
     }
   }, [listDir, readFile, getDefaultDir, getDefaultFile])
 
+  useEffect(() => {
+    try {
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+      const autoNotes = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, true)
+      const autoAtt = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, false)
+      const root = getDefaultDir()
+      if (enabled && root) {
+        if (autoNotes) useNoteFilesStore.getState().syncAllNotes(root).catch(() => {})
+        if (autoAtt) useNoteFilesStore.getState().syncAllAttachments(root).catch(() => {})
+      }
+    } catch {}
+  }, [])
+
+  const manualSyncNotes = async () => {
+    try {
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+      if (!enabled) { useToastStore.getState().showError('未开启云同步', '请在设置中开启'); return }
+      const root = getDefaultDir()
+      const { pushed, failed } = await useNoteFilesStore.getState().syncAllNotes(root)
+      if (pushed > 0) {
+        useToastStore.getState().showSuccess('笔记同步完成', `成功 ${pushed} 个${failed > 0 ? `，失败 ${failed}` : ''}`)
+      } else if (failed > 0) {
+        useToastStore.getState().showError('笔记同步失败', `失败 ${failed} 个`)
+      } else {
+        useToastStore.getState().showSuccess('无变更', '没有需要同步的笔记')
+      }
+    } catch {}
+  }
+
+  const manualSyncAttachments = async () => {
+    try {
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+      if (!enabled) { useToastStore.getState().showError('未开启云同步', '请在设置中开启'); return }
+      const root = getDefaultDir()
+      const { uploaded, failed } = await useNoteFilesStore.getState().syncAllAttachments(root)
+      if (uploaded > 0) {
+        useToastStore.getState().showSuccess('附件同步完成', `成功 ${uploaded} 个${failed > 0 ? `，失败 ${failed}` : ''}`)
+      } else if (failed > 0) {
+        useToastStore.getState().showError('附件同步失败', `失败 ${failed} 个`)
+      } else {
+        useToastStore.getState().showSuccess('无变更', '没有需要同步的附件')
+      }
+    } catch {}
+  }
+
+  const uploadCurrentFile = async () => {
+    try {
+      if (!currentFile) { useToastStore.getState().showError('上传失败', '未选择文件'); return }
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+      if (!enabled) { useToastStore.getState().showError('未开启云同步', '请在设置中开启'); return }
+      const root = getDefaultDir()
+      const ok = await useNoteFilesStore.getState().syncNoteFile(currentFile, root)
+      if (ok) {
+        const fileName = currentFile.split(sepOf(currentFile)).pop() || ''
+        useToastStore.getState().showSuccess('已上传到云端', fileName)
+      } else {
+        useToastStore.getState().showError('上传失败', '网络或权限错误')
+      }
+    } catch {}
+  }
+
+  const downloadCurrentFile = async () => {
+    try {
+      if (!currentFile) { useToastStore.getState().showError('下载失败', '未选择文件'); return }
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+      if (!enabled) { useToastStore.getState().showError('未开启云同步', '请在设置中开启'); return }
+      const root = getDefaultDir()
+      const dir = parentPath(currentFile)
+      const noteDir = relativeDir(root, dir)
+      const fileName = currentFile.split(sepOf(currentFile)).pop() || 'note.md'
+      const res = await apiClient.getNotebookNote({ filename: fileName, noteDir, useData: true })
+      if (res && res.success && res.data && res.data.content !== undefined) {
+        const ok = await writeFile(currentFile, String(res.data.content))
+        if (ok) {
+          setContent(String(res.data.content))
+          useToastStore.getState().showSuccess('已下载云端内容', fileName)
+        } else {
+          useToastStore.getState().showError('写入失败', '无法写入本地文件')
+        }
+      } else {
+        useToastStore.getState().showError('下载失败', '云端无此文件')
+      }
+    } catch (e) {
+      useToastStore.getState().showError('下载失败', e instanceof Error ? e.message : '未知错误')
+    }
+  }
+
   const sepOf = (p: string) => (p.includes('\\') ? '\\' : '/')
+  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const joinPath = (a: string, b: string) => {
     if (!a) return b
     const sep = sepOf(a)
-    return a.replace(new RegExp(`${sep}$`), '') + sep + b
+    const esc = escapeRe(sep)
+    return a.replace(new RegExp(`${esc}$`), '') + sep + b
   }
   const parentPath = (p: string) => {
     if (!p) return ''
@@ -76,6 +173,24 @@ export default function NotebookTab() {
     const parts = p.split(sep)
     parts.pop()
     return parts.join(sep)
+  }
+
+  const relativeDir = (root: string, dir: string) => {
+    if (!root || !dir) return ''
+    const rs = sepOf(root)
+    const ds = sepOf(dir)
+    const norm = (p: string, s: string) => {
+      const esc = escapeRe(s)
+      return p.replace(new RegExp(`${esc}+`, 'g'), s).replace(new RegExp(`${esc}$`), '')
+    }
+    const R = norm(root, rs)
+    const D = norm(dir, ds)
+    if (D.startsWith(R)) {
+      const rel = D.slice(R.length)
+      const esc = escapeRe(ds)
+      return rel.replace(new RegExp(`^${esc}`), '')
+    }
+    return ''
   }
 
   const chooseDir = async () => {
@@ -151,6 +266,19 @@ export default function NotebookTab() {
     setSaving(false)
     if (ok) {
       useToastStore.getState().showSuccess('已保存', '内容已写入文件')
+      try {
+        const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+        if (enabled && currentFile) {
+          const root = getDefaultDir()
+          const dir = parentPath(currentFile)
+          const noteDir = relativeDir(root, dir)
+          const fileName = currentFile.split(sepOf(currentFile)).pop() || 'note.md'
+          await apiClient.pushNotebookNote(content, { filename: fileName, noteDir, useData: true })
+          useToastStore.getState().showSuccess('已同步到云端', `${fileName}`)
+        }
+      } catch (e) {
+        useToastStore.getState().showError('云端同步失败', e instanceof Error ? e.message : '未知错误')
+      }
     } else {
       useToastStore.getState().showError('保存失败', '写入失败')
     }
@@ -158,6 +286,33 @@ export default function NotebookTab() {
 
   const refresh = () => {
     if (currentDir) listDir(currentDir)
+    try {
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+      const autoOnRefresh = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_REFRESH, true)
+      const autoNotes = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, true)
+      const autoAtt = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, false)
+      if (enabled && autoOnRefresh) {
+        const root = getDefaultDir()
+        if (autoNotes) {
+          useNoteFilesStore.getState().syncAllNotes(root).then(({ pushed, failed }) => {
+            if (pushed > 0) {
+              useToastStore.getState().showSuccess('已同步', `成功 ${pushed} 个笔记${failed > 0 ? `，失败 ${failed}` : ''}`)
+            } else if (failed > 0) {
+              useToastStore.getState().showError('同步失败', `失败 ${failed} 个笔记`)
+            }
+          }).catch(() => {})
+        }
+        if (autoAtt) {
+          useNoteFilesStore.getState().syncAllAttachments(root).then(({ uploaded, failed }) => {
+            if (uploaded > 0) {
+              useToastStore.getState().showSuccess('附件同步完成', `成功 ${uploaded} 个附件${failed > 0 ? `，失败 ${failed}` : ''}`)
+            } else if (failed > 0) {
+              useToastStore.getState().showError('附件同步失败', `失败 ${failed} 个附件`)
+            }
+          }).catch(() => {})
+        }
+      }
+    } catch {}
   }
 
   const goParent = () => {
@@ -356,6 +511,29 @@ export default function NotebookTab() {
             setContent((prev) => prev + mdImg)
           }
           inserted++
+
+          try {
+            const syncEnabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+            if (syncEnabled) {
+              const abs = joinPath(baseDir, rel)
+              const read = await window.electronAPI.readBytesFile(abs)
+              if (read && read.success && read.data) {
+                const fileName = rel.split('/').pop() || `image-${Date.now()}.png`
+                const noteRoot = getDefaultDir()
+                const noteDir = relativeDir(noteRoot, baseDir)
+                const pathRel = 'attachments'
+                const typeGuess = (fileName.toLowerCase().endsWith('.jpg') || fileName.toLowerCase().endsWith('.jpeg')) ? 'image/jpeg'
+                  : fileName.toLowerCase().endsWith('.png') ? 'image/png'
+                  : fileName.toLowerCase().endsWith('.webp') ? 'image/webp'
+                  : 'application/octet-stream'
+                const blobU = new Blob([read.data], { type: typeGuess })
+                await apiClient.uploadNotebookAttachment(blobU, { filename: fileName, noteDir, pathRel, useData: true })
+                useToastStore.getState().showSuccess('已同步到云端', `${fileName}`)
+              }
+            }
+          } catch (e) {
+            useToastStore.getState().showError('云端同步失败', e instanceof Error ? e.message : '未知错误')
+          }
         } else {
           const mdImg = `\n\n![](${dataUrl})\n`
           if (view) {
@@ -696,6 +874,44 @@ export default function NotebookTab() {
             <RefreshCw className="w-3 h-3" />
             <span>刷新</span>
           </button>
+          <div className="relative">
+            <button onClick={() => setShowSyncMenu(s => !s)} className="px-2 py-1 rounded text-xs bg-indigo-100 text-indigo-700 hover:bg-indigo-200">同步 ▾</button>
+            {showSyncMenu && (
+              <div className="absolute right-0 mt-1 bg-white border border-gray-200 rounded shadow p-2 z-10 min-w-[180px]">
+                <div className="flex flex-col space-y-1">
+                  <button onClick={manualSyncNotes} className="px-2 py-1 rounded text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-left">同步笔记</button>
+                  <button onClick={manualSyncAttachments} className="px-2 py-1 rounded text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-left">同步附件</button>
+                  <button onClick={uploadCurrentFile} className="px-2 py-1 rounded text-xs bg-green-50 text-green-700 hover:bg-green-100 text-left">上传当前</button>
+                  <button onClick={downloadCurrentFile} className="px-2 py-1 rounded text-xs bg-yellow-50 text-yellow-700 hover:bg-yellow-100 text-left">下载当前</button>
+                  <div className="border-t border-gray-200 my-1" />
+                  <button
+                    onClick={async () => {
+                      await useSettingsStore.getState().setSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, !syncEnabledSetting)
+                    }}
+                    className={`px-2 py-1 rounded text-xs text-left ${syncEnabledSetting ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  >云同步</button>
+                  <button
+                    onClick={async () => {
+                      await useSettingsStore.getState().setSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_REFRESH, !autoOnRefreshSetting)
+                    }}
+                    className={`px-2 py-1 rounded text-xs text-left ${autoOnRefreshSetting ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  >刷新自动</button>
+                  <button
+                    onClick={async () => {
+                      await useSettingsStore.getState().setSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, !autoNotesSetting)
+                    }}
+                    className={`px-2 py-1 rounded text-xs text-left ${autoNotesSetting ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  >自动笔记</button>
+                  <button
+                    onClick={async () => {
+                      await useSettingsStore.getState().setSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, !autoAttSetting)
+                    }}
+                    className={`px-2 py-1 rounded text-xs text-left ${autoAttSetting ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  >自动附件</button>
+                </div>
+              </div>
+            )}
+          </div>
           <button onClick={saveContent} disabled={saving} className="px-2 py-1 rounded text-xs bg-green-100 text-green-700 hover:bg-green-200 flex items-center space-x-1">
             <Save className="w-3 h-3" />
             <span>{saving ? '保存中' : '保存'}</span>

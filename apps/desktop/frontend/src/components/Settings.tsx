@@ -862,6 +862,9 @@ export const Settings: React.FC = () => {
     const defaultDir = getSetting(SETTING_KEYS.NOTEBOOK_DEFAULT_DIR, '') as string
     const defaultFile = getSetting(SETTING_KEYS.NOTEBOOK_DEFAULT_FILE, '') as string
     const syncEnabled = getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
+    const autoOnRefresh = getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_REFRESH, true) as boolean
+    const autoNotes = getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, true) as boolean
+    const autoAtt = getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, false) as boolean
     const chooseDir = async () => {
       const res = await window.electronAPI?.showOpenDialog?.({ properties: ['openDirectory', 'createDirectory'] })
       if (!res?.canceled && res?.filePaths?.length > 0) {
@@ -917,6 +920,27 @@ export const Settings: React.FC = () => {
           <Switch
             checked={syncEnabled}
             onChange={(checked) => handleSave(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, checked)}
+            disabled={isLoading}
+          />
+        </SettingItem>
+        <SettingItem title="刷新时自动同步" description="刷新文件列表时，同步变更的笔记/附件">
+          <Switch
+            checked={autoOnRefresh}
+            onChange={(checked) => handleSave(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_REFRESH, checked)}
+            disabled={isLoading}
+          />
+        </SettingItem>
+        <SettingItem title="自动同步笔记" description="启用后自动同步笔记">
+          <Switch
+            checked={autoNotes}
+            onChange={(checked) => handleSave(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, checked)}
+            disabled={isLoading}
+          />
+        </SettingItem>
+        <SettingItem title="自动同步附件" description="启用后自动同步附件">
+          <Switch
+            checked={autoAtt}
+            onChange={(checked) => handleSave(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, checked)}
             disabled={isLoading}
           />
         </SettingItem>
