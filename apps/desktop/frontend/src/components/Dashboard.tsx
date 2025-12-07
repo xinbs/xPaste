@@ -3,16 +3,20 @@ import { useAuthStore } from '@/store/auth';
 import { useClipboardStore } from '@/store/clipboard';
 import { useWebSocketStore } from '@/store/websocket';
 import { useConfigStore } from '@/store/config';
-import { Copy, Monitor, LogOut, Plus, Trash2, Upload, Play, Pause, X, RefreshCw, Edit2, Settings as SettingsIcon, Search, Type, Image as ImageIcon, FileText } from 'lucide-react';
+import { Copy, Monitor, LogOut, Plus, Trash2, Upload, Play, Pause, X, RefreshCw, Edit2, Settings as SettingsIcon, Search, Type, Image as ImageIcon, FileText, Save } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import FileUpload, { FilePreview } from '@/components/FileUpload';
 import WebSocketStatus from '@/components/WebSocketStatus';
 import WindowControls from '@/components/WindowControls';
 import Settings from '@/components/Settings';
+import { useNoteFilesStore } from '@/store/noteFiles';
+import { useToastStore } from '@/store/toast';
+
+import NotebookTab from '@/components/NotebookTab';
 
 export default function Dashboard() {
   console.log('Dashboard: 组件开始渲染...');
-  const [activeTab, setActiveTab] = useState<'clipboard' | 'quickadd' | 'devices' | 'settings'>('clipboard');
+  const [activeTab, setActiveTab] = useState<'clipboard' | 'quickadd' | 'devices' | 'notebook' | 'settings'>('clipboard');
   const [newClipText, setNewClipText] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [showFileUpload, setShowFileUpload] = useState(false);
@@ -531,6 +535,15 @@ export default function Dashboard() {
                               <Copy className="w-3 h-3" />
                             </button>
                           )}
+                          {(item.type === 'text' || item.type === 'image') && (
+                            <button
+                              onClick={() => handleSaveToNotebook(item)}
+                              className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                              title="保存到记事本"
+                            >
+                              <Save className="w-3 h-3" />
+                            </button>
+                          )}
                           <button
                             onClick={() => handleDeleteItem(item.id)}
                             className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
@@ -974,6 +987,7 @@ export default function Dashboard() {
                 { key: 'clipboard', label: '历史', icon: Copy, shortLabel: '历史' },
                 { key: 'quickadd', label: '添加', icon: Plus, shortLabel: '添加' },
                 { key: 'devices', label: '设备', icon: Monitor, shortLabel: '设备' },
+                { key: 'notebook', label: '记事本', icon: FileText, shortLabel: '记事本' },
                 { key: 'settings', label: '设置', icon: SettingsIcon, shortLabel: '设置' },
               ].map(({ key, label, icon: Icon, shortLabel }) => (
                 <button
@@ -1054,6 +1068,11 @@ export default function Dashboard() {
         {activeTab === 'clipboard' && renderClipboardTab()}
         {activeTab === 'quickadd' && renderQuickAddTab()}
         {activeTab === 'devices' && renderDevicesTab()}
+        {activeTab === 'notebook' && (
+          <div className="h-full overflow-y-auto scrollbar-thin">
+            <NotebookTab />
+          </div>
+        )}
         {activeTab === 'settings' && (
           <div className="h-full overflow-y-auto scrollbar-thin">
             {renderSettingsTab()}
@@ -1063,3 +1082,20 @@ export default function Dashboard() {
     </div>
   );
 }
+  const handleSaveToNotebook = async (item: any) => {
+    try {
+      const ok = await useNoteFilesStore.getState().saveClipboardItemToDefaultMd({
+        type: item.type,
+        content: item.content,
+        file_path: item.file_path,
+        metadata: item.metadata,
+      })
+      if (ok) {
+        useToastStore.getState().showSuccess('已保存到记事本', '内容已追加到默认Markdown文件')
+      } else {
+        useToastStore.getState().showError('保存失败', '请检查记事本默认目录/文件设置')
+      }
+    } catch (err) {
+      useToastStore.getState().showError('保存失败', err instanceof Error ? err.message : '未知错误')
+    }
+  }

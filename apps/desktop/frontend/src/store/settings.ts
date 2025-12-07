@@ -22,6 +22,10 @@ export const SETTING_KEYS = {
   USER_CLOSE_BEHAVIOR: 'user.close_behavior',
   // 服务器设置
   SERVER_URL: 'server.url',
+  // 记事本设置
+  NOTEBOOK_DEFAULT_DIR: 'notebook.default_dir',
+  NOTEBOOK_DEFAULT_FILE: 'notebook.default_file',
+  NOTEBOOK_SYNC_ENABLED: 'notebook.sync_enabled',
 } as const;
 
 // 设置分组

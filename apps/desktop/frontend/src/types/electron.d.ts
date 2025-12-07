@@ -44,6 +44,15 @@ export interface ElectronAPI {
   syncHotkeys: (hotkeys: { show_window?: string }) => Promise<{ success: boolean; error?: string }>;
   // 关闭行为同步
   syncCloseBehavior: (behavior: { close_action: 'minimize' | 'hide' | 'quit' }) => Promise<{ success: boolean; error?: string }>;
+  readTextFile: (filePath: string) => Promise<{ success: boolean; data?: string; error?: string }>;
+  writeTextFile: (filePath: string, content: string) => Promise<{ success: boolean; error?: string }>;
+  appendTextFile: (filePath: string, content: string) => Promise<{ success: boolean; error?: string }>;
+  ensureDir: (dirPath: string) => Promise<{ success: boolean; error?: string }>;
+  listDir: (dirPath: string) => Promise<{ success: boolean; data?: Array<{ name: string; path: string; isDirectory: boolean; isFile: boolean }>; error?: string }>;
+  deletePath: (targetPath: string) => Promise<{ success: boolean; error?: string }>;
+  renamePath: (fromPath: string, toPath: string) => Promise<{ success: boolean; error?: string }>;
+  saveBase64File: (filePath: string, base64DataUrl: string) => Promise<{ success: boolean; error?: string }>;
+  existsPath: (targetPath: string) => Promise<{ success: boolean; data?: boolean; error?: string }>;
 }
 
 declare global {

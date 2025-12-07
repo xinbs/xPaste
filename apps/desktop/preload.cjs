@@ -72,4 +72,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   syncHotkeys: (hotkeys) => ipcRenderer.invoke('update-hotkeys', hotkeys),
   // 同步关闭行为到主进程
   syncCloseBehavior: (behavior) => ipcRenderer.invoke('update-close-behavior', behavior),
+  readTextFile: (filePath) => ipcRenderer.invoke('fs-read-text', filePath),
+  writeTextFile: (filePath, content) => ipcRenderer.invoke('fs-write-text', filePath, content),
+  appendTextFile: (filePath, content) => ipcRenderer.invoke('fs-append-text', filePath, content),
+  ensureDir: (dirPath) => ipcRenderer.invoke('fs-ensure-dir', dirPath),
+  listDir: (dirPath) => ipcRenderer.invoke('fs-list', dirPath),
+  deletePath: (targetPath) => ipcRenderer.invoke('fs-delete', targetPath),
+  renamePath: (fromPath, toPath) => ipcRenderer.invoke('fs-rename', fromPath, toPath),
+  saveBase64File: (filePath, base64DataUrl) => ipcRenderer.invoke('fs-save-base64', filePath, base64DataUrl),
+  existsPath: (targetPath) => ipcRenderer.invoke('fs-exists', targetPath),
 });

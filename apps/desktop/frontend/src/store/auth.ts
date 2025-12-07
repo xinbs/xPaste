@@ -190,8 +190,40 @@ export const useAuthStore = create<AuthState>()(
                 }
               }
             } catch (deviceError) {
-              // 设备相关操作失败不影响登录，用户可以稍后手动处理
-              console.warn('Auto device setup failed:', deviceError);
+              const msg = deviceError instanceof Error ? deviceError.message : String(deviceError);
+              try {
+                if (msg.includes('UNIQUE constraint') || msg.toLowerCase().includes('device_id')) {
+                  const { clearDeviceId, getOrCreateDeviceId, getDeviceName, getDevicePlatform, getLocalIPAddress } = await import('../lib/device');
+                  clearDeviceId();
+                  const regeneratedId = getOrCreateDeviceId();
+                  const localIP = await getLocalIPAddress();
+                  const retryInfo = {
+                    device_id: regeneratedId,
+                    name: getDeviceName(),
+                    platform: getDevicePlatform(),
+                    version: '1.0.0',
+                    capabilities: {
+                      clipboard_read: true,
+                      clipboard_write: true,
+                      file_upload: true,
+                      image_ocr: false,
+                      notifications: true,
+                      websocket: true
+                    },
+                    private_ip: localIP || undefined
+                  };
+                  const retryResponse = await apiClient.registerDevice(retryInfo);
+                  if (retryResponse.success) {
+                    const newDevice = retryResponse.data;
+                    const devicesResponse = await apiClient.getDevices();
+                    const devices = devicesResponse.success ? devicesResponse.data.items : [];
+                    set({
+                      devices: devices.length ? devices : [newDevice],
+                      currentDevice: newDevice
+                    });
+                  }
+                }
+              } catch {}
             }
             
             return true;
@@ -272,6 +304,23 @@ export const useAuthStore = create<AuthState>()(
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : '设备注册失败';
+          if (errorMessage.includes('UNIQUE constraint') || errorMessage.toLowerCase().includes('device_id')) {
+            try {
+              const { clearDeviceId, getOrCreateDeviceId } = await import('../lib/device');
+              clearDeviceId();
+              const regeneratedId = getOrCreateDeviceId();
+              const retryResponse = await apiClient.registerDevice({ ...deviceInfo, device_id: regeneratedId });
+              if (retryResponse.success) {
+                const newDevice = retryResponse.data;
+                set({
+                  currentDevice: newDevice,
+                  devices: [...get().devices, newDevice],
+                  isLoading: false,
+                });
+                return true;
+              }
+            } catch {}
+          }
           set({ error: errorMessage, isLoading: false });
           useToastStore.getState().showError('设备注册失败', errorMessage);
           return false;

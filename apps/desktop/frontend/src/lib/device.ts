@@ -66,6 +66,17 @@ function hashString(str: string): string {
   return Math.abs(hash).toString(36);
 }
 
+function generateRandomDeviceId(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) {
+    const v = bytes[i];
+    hex += (v < 16 ? '0' : '') + v.toString(16);
+  }
+  return `dev-${hex}`;
+}
+
 /**
  * 获取或生成设备ID
  * 优先从localStorage获取，如果不存在则生成新的
@@ -77,8 +88,10 @@ export function getOrCreateDeviceId(): string {
   let deviceId = localStorage.getItem(DEVICE_ID_KEY);
   
   if (!deviceId) {
-    // 生成新的设备ID
-    deviceId = generateDeviceFingerprint();
+    deviceId = generateRandomDeviceId();
+    localStorage.setItem(DEVICE_ID_KEY, deviceId);
+  } else if (deviceId.length < 12) {
+    deviceId = generateRandomDeviceId();
     localStorage.setItem(DEVICE_ID_KEY, deviceId);
   }
   

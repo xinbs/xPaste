@@ -43,3 +43,8 @@ services/sync-api/data/xpaste.db-*
 services/sync-api/logs/*
 *.log
 apps/desktop/dist-electron/*
+apps/desktop/frontend/dist/
+apps/admin-web/dist/
+services/**/bin/
+services/admin-api/admin-api.exe
+services/sync-api/server.exe

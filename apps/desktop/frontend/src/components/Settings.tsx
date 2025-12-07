@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Settings as SettingsIcon, Save, RotateCcw, Download, Upload, AlertCircle, CheckCircle, X, Server, Wifi, LogIn, Keyboard } from 'lucide-react';
 import { useSettingsStore, SETTING_KEYS, SETTING_GROUPS } from '../store/settings';
+import { useNoteFilesStore } from '../store/noteFiles';
 import { useAuthStore } from '../store/auth';
 import { useConfigStore } from '../store/config';
 import { cn } from '../lib/utils';
@@ -388,6 +389,7 @@ export const Settings: React.FC = () => {
     { key: 'general' as const, label: '常规设置', icon: SettingsIcon },
     { key: 'appearance' as const, label: '外观设置', icon: SettingsIcon },
     { key: 'server' as const, label: '服务器配置', icon: Server },
+    { key: 'notebook' as const, label: '记事本设置', icon: SettingsIcon },
     { key: 'sync' as const, label: '同步设置', icon: SettingsIcon },
     { key: 'advanced' as const, label: '高级设置', icon: SettingsIcon },
   ];
@@ -856,6 +858,72 @@ export const Settings: React.FC = () => {
     </div>
   );
 
+  const renderNotebookSettings = () => {
+    const defaultDir = getSetting(SETTING_KEYS.NOTEBOOK_DEFAULT_DIR, '') as string
+    const defaultFile = getSetting(SETTING_KEYS.NOTEBOOK_DEFAULT_FILE, '') as string
+    const syncEnabled = getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
+    const chooseDir = async () => {
+      const res = await window.electronAPI?.showOpenDialog?.({ properties: ['openDirectory', 'createDirectory'] })
+      if (!res?.canceled && res?.filePaths?.length > 0) {
+        const dirPath = res.filePaths[0]
+        await useNoteFilesStore.getState().setDefaultDir(dirPath)
+        await fetchSettings()
+      }
+    }
+    const chooseFile = async () => {
+      const res = await window.electronAPI?.showSaveDialog?.({ filters: [{ name: 'Markdown', extensions: ['md'] }], defaultPath: 'default.md' })
+      if (!res?.canceled && res?.filePath) {
+        await useNoteFilesStore.getState().setDefaultFile(res.filePath)
+        await fetchSettings()
+      }
+    }
+    return (
+      <div className="space-y-0">
+        <SettingItem title="默认目录" description="选择用于管理 Markdown 文件的本地目录">
+          <div className="flex flex-col sm:flex-row items-center gap-2 w-full">
+            <input
+              type="text"
+              value={defaultDir || ''}
+              readOnly
+              className="block w-full sm:flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none sm:text-sm"
+            />
+            <button
+              onClick={chooseDir}
+              disabled={isLoading}
+              className="inline-flex items-center px-3 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700"
+            >
+              选择目录
+            </button>
+          </div>
+        </SettingItem>
+        <SettingItem title="默认文件" description="用于快速保存剪贴板到 Markdown">
+          <div className="flex flex-col sm:flex-row items-center gap-2 w-full">
+            <input
+              type="text"
+              value={defaultFile || ''}
+              readOnly
+              className="block w-full sm:flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none sm:text-sm"
+            />
+            <button
+              onClick={chooseFile}
+              disabled={isLoading}
+              className="inline-flex items-center px-3 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700"
+            >
+              选择文件
+            </button>
+          </div>
+        </SettingItem>
+        <SettingItem title="启用目录同步" description="同步记事本目录到服务器">
+          <Switch
+            checked={syncEnabled}
+            onChange={(checked) => handleSave(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, checked)}
+            disabled={isLoading}
+          />
+        </SettingItem>
+      </div>
+    )
+  }
+
   // 根据活动组渲染设置内容
   const renderSettingsContent = () => {
     switch (activeGroup) {
@@ -865,6 +933,8 @@ export const Settings: React.FC = () => {
         return renderAppearanceSettings();
       case 'server':
         return renderServerSettings();
+      case 'notebook':
+        return renderNotebookSettings();
       case 'sync':
         return renderSyncSettings();
       case 'advanced':
