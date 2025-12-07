@@ -1,8 +1,8 @@
-const { app, BrowserWindow, Menu, shell, ipcMain, dialog, Tray, nativeImage, clipboard, globalShortcut } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain, dialog, Tray, nativeImage, clipboard, globalShortcut, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-const isDev = process.env.NODE_ENV === 'development';
+const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 // 关闭按钮行为：'minimize' | 'hide' | 'quit'
 let userCloseBehavior = 'minimize';
 // Token 存储模式：默认磁盘，可通过环境变量切换为内存
@@ -542,6 +542,10 @@ function createWindow() {
     if (isDev) {
       mainWindow.focus();
     }
+
+    try {
+      mainWindow.maximize();
+    } catch (_) {}
 
     // 向渲染进程请求当前服务器配置，确保主进程握手后持有最新 API 地址
     try {
@@ -1304,6 +1308,98 @@ ipcMain.handle('close-current-window', (event) => {
   const window = BrowserWindow.fromWebContents(event.sender);
   if (window) {
     window.close();
+  }
+});
+
+ipcMain.handle('fs-read-text', async (event, filePath) => {
+  try {
+    const data = fs.readFileSync(filePath, 'utf-8');
+    return { success: true, data };
+  } catch (err) {
+    return { success: false, error: err?.message || 'read failed' };
+  }
+});
+
+ipcMain.handle('fs-write-text', async (event, filePath, content) => {
+  try {
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message || 'write failed' };
+  }
+});
+
+ipcMain.handle('fs-append-text', async (event, filePath, content) => {
+  try {
+    fs.appendFileSync(filePath, content, 'utf-8');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message || 'append failed' };
+  }
+});
+
+ipcMain.handle('fs-ensure-dir', async (event, dirPath) => {
+  try {
+    fs.mkdirSync(dirPath, { recursive: true });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message || 'mkdir failed' };
+  }
+});
+
+ipcMain.handle('fs-list', async (event, dirPath) => {
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true }).map((d) => ({
+      name: d.name,
+      path: path.join(dirPath, d.name),
+      isDirectory: d.isDirectory(),
+      isFile: d.isFile(),
+    }));
+    return { success: true, data: entries };
+  } catch (err) {
+    return { success: false, error: err?.message || 'list failed' };
+  }
+});
+
+ipcMain.handle('fs-delete', async (event, targetPath) => {
+  try {
+    fs.rmSync(targetPath, { recursive: true, force: true });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message || 'delete failed' };
+  }
+});
+
+ipcMain.handle('fs-rename', async (event, fromPath, toPath) => {
+  try {
+    fs.renameSync(fromPath, toPath);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message || 'rename failed' };
+  }
+});
+
+ipcMain.handle('fs-save-base64', async (event, filePath, base64DataUrl) => {
+  try {
+    let data = base64DataUrl;
+    const idx = typeof data === 'string' ? data.indexOf(',') : -1;
+    if (idx >= 0) {
+      data = data.slice(idx + 1);
+    }
+    const buf = Buffer.from(data, 'base64');
+    fs.writeFileSync(filePath, buf);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message || 'save failed' };
+  }
+});
+
+ipcMain.handle('fs-exists', async (event, targetPath) => {
+  try {
+    const ok = fs.existsSync(targetPath);
+    return { success: true, data: ok };
+  } catch (err) {
+    return { success: false, error: err?.message || 'exists failed' };
   }
 });
 

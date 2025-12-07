@@ -169,8 +169,6 @@ pnpm dev
 ```bash
 # 在 apps/desktop 目录
 pnpm electron:dev
-# 或者
-NODE_ENV=development pnpm electron
 ```
 
 **生产模式（自定义标题栏和窗口控制）：**
@@ -198,8 +196,23 @@ $env:NODE_ENV="production"; pnpm electron
 - **后端同步API服务**: http://localhost:8080
 - **桌面应用前端**: http://localhost:5173
 - **管理后台API服务**: http://localhost:8081
-- **管理后台前端**: http://localhost:3010
-- **WebSocket 连接**: ws://localhost:8080/ws
+ - **管理后台前端**: http://localhost:3010
+ - **WebSocket 连接**: ws://localhost:8080/ws
+
+### 跨平台启动指南（Windows/macOS）
+
+#### Windows（PowerShell）
+- 前端（Vite 5173）：在项目根目录运行 `pnpm --filter desktop dev`
+- Electron（开发模式）：在项目根目录运行 `pnpm --filter desktop electron:dev`
+- 后端（Sync API 8080）：在项目根目录运行 `pnpm --filter sync-api dev`
+- 终端中文日志乱码时，在当前会话先运行：`chcp 65001; $OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8`
+- 重装 Node.js 后如命令不可用，重启终端/IDE；确保系统 PATH 包含 `C:\Program Files\nodejs` 与 `%APPDATA%\npm`
+
+#### macOS（zsh/bash）
+- 前端（Vite 5173）：在项目根目录运行 `pnpm --filter desktop dev`
+- Electron（开发模式）：在项目根目录运行 `pnpm --filter desktop electron:dev`
+- 后端（Sync API 8080）：在项目根目录运行 `pnpm --filter sync-api dev`
+- 如需生产模式构建：在 `apps/desktop` 运行 `pnpm build` 后执行 `pnpm electron`
 
 ### 开发命令参考
 
