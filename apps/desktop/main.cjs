@@ -54,6 +54,39 @@ function loadTokenFromDisk() {
   return null;
 }
 
+const WINDOW_STATE_FILE_NAME = 'window-state.json';
+
+function getWindowStatePath() {
+  const userDataPath = app.getPath('userData');
+  try { if (!fs.existsSync(userDataPath)) fs.mkdirSync(userDataPath, { recursive: true }); } catch {}
+  return path.join(userDataPath, WINDOW_STATE_FILE_NAME);
+}
+
+function loadWindowState() {
+  try {
+    const p = getWindowStatePath();
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      const w = Number(data?.width) || 400;
+      const h = Number(data?.height) || 600;
+      const x = typeof data?.x === 'number' ? data.x : undefined;
+      const y = typeof data?.y === 'number' ? data.y : undefined;
+      return { width: w, height: h, x, y };
+    }
+  } catch {}
+  return { width: 400, height: 600 };
+}
+
+function saveWindowStateFrom(win) {
+  try {
+    if (!win) return;
+    const normal = win.isMaximized() ? win.getNormalBounds() : win.getBounds();
+    const data = { width: normal.width, height: normal.height, x: normal.x, y: normal.y };
+    const p = getWindowStatePath();
+    fs.writeFileSync(p, JSON.stringify(data));
+  } catch {}
+}
+
 // 跨平台图标路径获取函数
 function getWindowIcon() {
   const platform = process.platform;
@@ -462,10 +495,10 @@ function startClipboardMonitoring(window) {
 }
 
 function createWindow() {
-  // 创建浏览器窗口 - 设计为紧凑的长条形剪贴板工具
+  const initState = loadWindowState();
   mainWindow = new BrowserWindow({
-    width: 400,           // 较窄的宽度，适合长条形设计
-    height: 600,          // 较高的高度，便于显示历史记录列表
+    width: initState.width,
+    height: initState.height,
     minWidth: 320,        // 最小宽度限制，保证基本可用性
     minHeight: 400,       // 最小高度
     // maxWidth: 800,        // 最大宽度限制，避免过宽
@@ -494,9 +527,8 @@ function createWindow() {
       // 控制按钮样式
       backgroundColor: '#f9fafb'
     } : undefined,
-    // 窗口位置优化
-    x: undefined,
-    y: undefined,
+    x: initState.x,
+    y: initState.y,
     // 窗口样式优化
     transparent: false,
     alwaysOnTop: false,
@@ -542,10 +574,6 @@ function createWindow() {
     if (isDev) {
       mainWindow.focus();
     }
-
-    try {
-      mainWindow.maximize();
-    } catch (_) {}
 
     // 向渲染进程请求当前服务器配置，确保主进程握手后持有最新 API 地址
     try {
@@ -602,6 +630,7 @@ function createWindow() {
 
   mainWindow.on('unmaximize', () => {
     mainWindow.webContents.send('window-unmaximized');
+    try { saveWindowStateFrom(mainWindow) } catch {}
   });
 
   // 最小化时按需隐藏 Dock（macOS）
@@ -613,6 +642,7 @@ function createWindow() {
 
   // 窗口关闭时隐藏到托盘而不是退出
   mainWindow.on('close', (event) => {
+    try { saveWindowStateFrom(mainWindow) } catch {}
     if (app.isQuiting) {
       return;
     }
@@ -655,6 +685,11 @@ function createWindow() {
     // 与此同时，你应该删除相应的元素。
     mainWindow = null;
   });
+
+  try {
+    mainWindow.on('resize', () => { saveWindowStateFrom(mainWindow) });
+    mainWindow.on('move', () => { saveWindowStateFrom(mainWindow) });
+  } catch {}
 
   // 处理外部链接与预览窗口
   // 默认策略：

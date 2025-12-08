@@ -3,7 +3,7 @@ import { useNoteFilesStore } from '@/store/noteFiles'
 import { useSettingsStore, SETTING_KEYS } from '@/store/settings'
 import apiClient from '@/lib/api'
 import { useToastStore } from '@/store/toast'
-import { FileText, FolderOpen, Save, RefreshCw, ArrowLeft, Folder as FolderIcon, Eye, Pencil, Sun, Moon, Search, ChevronUp, ChevronDown, ChevronRight, X, Plus, Star } from 'lucide-react'
+import { FileText, FolderOpen, Save, RefreshCw, ArrowLeft, Folder as FolderIcon, Eye, Pencil, Sun, Moon, Search, ChevronUp, ChevronDown, ChevronRight, X, Plus, Star, Cloud } from 'lucide-react'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/atom-one-dark.css'
 import MarkdownIt from 'markdown-it'
@@ -600,6 +600,25 @@ export default function NotebookTab() {
     return md
   }
 
+  // 解析相对路径为绝对路径：严格按照“相对于当前md文件所在目录”的规则
+  const resolveRelAbs = (rel: string, baseDir: string) => {
+    let r = rel
+    try { r = decodeURIComponent(rel) } catch {}
+    return joinPath(baseDir, r)
+  }
+
+  const debugLog = (...args: unknown[]) => {
+    try {
+      const s = args.map(a => {
+        try { return typeof a === 'string' ? a : JSON.stringify(a) } catch { return String(a) }
+      }).join(' ')
+      console.log('[NotebookPreview]', ...args)
+      if ((window as any).electronAPI && typeof (window as any).electronAPI.log === 'function') {
+        (window as any).electronAPI.log('[NotebookPreview] ' + s)
+      }
+    } catch {}
+  }
+
   useEffect(() => {
     mdRef.current = createMd()
   }, [currentDir, currentFile])
@@ -611,6 +630,7 @@ export default function NotebookTab() {
     const baseDir = currentFile ? parentPath(currentFile) : (currentDir || getDefaultDir())
     if (!baseDir) return
     const imgs = Array.from(previewRef.current.querySelectorAll('img[data-xpaste-local="true"]')) as HTMLImageElement[]
+    debugLog('preview-load-start', { count: imgs.length, baseDir })
     const guessType = (p: string) => {
       const lower = p.toLowerCase()
       if (lower.endsWith('.png')) return 'image/png'
@@ -619,33 +639,75 @@ export default function NotebookTab() {
       if (lower.endsWith('.gif')) return 'image/gif'
       return 'image/png'
     }
+    const toUint8 = (d: any): Uint8Array | null => {
+      try {
+        if (!d) return null
+        if (d instanceof Uint8Array) return d
+        if (Array.isArray(d)) return new Uint8Array(d)
+        if (typeof d === 'object' && d.type === 'Buffer' && Array.isArray(d.data)) return new Uint8Array(d.data)
+        if (typeof d === 'object' && typeof d.byteLength === 'number' && d.buffer) return new Uint8Array(d as ArrayBuffer)
+      } catch {}
+      return null
+    }
+
     const loadAll = async () => {
       for (const img of imgs) {
         const rel = img.getAttribute('data-xpaste-src') || ''
         if (!rel) continue
-        const abs = joinPath(baseDir, rel)
+        const abs = resolveRelAbs(rel, baseDir)
+        let exists = true
+        if (typeof window.electronAPI.existsPath === 'function') {
+          try {
+            const ex = await window.electronAPI.existsPath(abs)
+            exists = !!(ex && ex.success && ex.data)
+          } catch { exists = true }
+        }
+        if (!exists) { img.alt = '图片不存在'; debugLog('image-not-exists', { rel, abs }); continue }
+
+        let ok = false
+
+        // 优先使用本地 file:// 路径加载，失败则回退到字节或 dataURL
         try {
-          let ok = false
-          if (typeof window.electronAPI.readBytesFile === 'function') {
+          const fileUrl = 'file://' + abs.replace(/\\/g, '/');
+          img.decoding = 'async'
+          img.loading = 'lazy'
+          img.src = encodeURI(fileUrl)
+          await new Promise((resolve, reject) => {
+            const onLoad = () => { img.removeEventListener('load', onLoad); img.removeEventListener('error', onErr); resolve(null) }
+            const onErr = () => { img.removeEventListener('load', onLoad); img.removeEventListener('error', onErr); reject(new Error('file-url-error')) }
+            img.addEventListener('load', onLoad)
+            img.addEventListener('error', onErr)
+          })
+          ok = true
+          debugLog('image-loaded-file-url', { rel, abs })
+        } catch {}
+
+        if (!ok && typeof window.electronAPI.readBytesFile === 'function') {
+          try {
             const res = await window.electronAPI.readBytesFile(abs)
-            if (res && res.success && res.data) {
-              const blob = new Blob([res.data], { type: guessType(rel) })
+            const u8 = res && res.success ? toUint8(res.data) : null
+            if (u8 && u8.byteLength > 0) {
+              const blob = new Blob([u8], { type: guessType(rel) })
               const url = URL.createObjectURL(blob)
               img.src = url
               ok = true
+              debugLog('image-loaded-blob', { rel, abs, size: u8.byteLength })
             }
-          }
-          if (!ok && typeof window.electronAPI.readDataUrlFile === 'function') {
+          } catch {}
+        }
+
+        if (!ok && typeof window.electronAPI.readDataUrlFile === 'function') {
+          try {
             const res2 = await window.electronAPI.readDataUrlFile(abs)
             if (res2 && res2.success && res2.data) {
               img.src = res2.data
               ok = true
+              debugLog('image-loaded-dataurl', { rel, abs, len: (res2.data || '').length })
             }
-          }
-          if (!ok) img.alt = '图片加载失败'
-        } catch {
-          img.alt = '图片加载失败'
+          } catch {}
         }
+
+        if (!ok) { img.alt = '图片加载失败'; debugLog('image-load-failed', { rel, abs }) }
       }
     }
     loadAll()
@@ -864,18 +926,23 @@ export default function NotebookTab() {
           <FileText className="w-4 h-4 text-gray-700" />
           <span className="text-sm font-medium text-gray-900">记事本</span>
         </div>
-        <div className="flex items-center space-x-2">
-          <button onClick={chooseDir} className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 flex items-center space-x-1">
+        <div className="flex flex-wrap items-center gap-1 sm:gap-2">
+          <button onClick={chooseDir} className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 flex items-center space-x-1" title="选择目录">
             <FolderOpen className="w-3 h-3" />
-            <span>选择目录</span>
+            <span className="hidden sm:inline">选择目录</span>
           </button>
-          <button onClick={openFilePicker} className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200">选择默认.md</button>
-          <button onClick={refresh} className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center space-x-1">
+          <button onClick={openFilePicker} className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200" title="选择默认.md">
+            <span className="hidden sm:inline">选择默认.md</span>
+          </button>
+          <button onClick={refresh} className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center space-x-1" title="刷新">
             <RefreshCw className="w-3 h-3" />
-            <span>刷新</span>
+            <span className="hidden sm:inline">刷新</span>
           </button>
           <div className="relative">
-            <button onClick={() => setShowSyncMenu(s => !s)} className="px-2 py-1 rounded text-xs bg-indigo-100 text-indigo-700 hover:bg-indigo-200">同步 ▾</button>
+            <button onClick={() => setShowSyncMenu(s => !s)} className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs bg-indigo-100 text-indigo-700 hover:bg-indigo-200 flex items-center space-x-1" title="同步">
+              <Cloud className="w-3 h-3" />
+              <span className="hidden sm:inline">同步 ▾</span>
+            </button>
             {showSyncMenu && (
               <div className="absolute right-0 mt-1 bg-white border border-gray-200 rounded shadow p-2 z-10 min-w-[180px]">
                 <div className="flex flex-col space-y-1">
@@ -912,18 +979,18 @@ export default function NotebookTab() {
               </div>
             )}
           </div>
-          <button onClick={saveContent} disabled={saving} className="px-2 py-1 rounded text-xs bg-green-100 text-green-700 hover:bg-green-200 flex items-center space-x-1">
+          <button onClick={saveContent} disabled={saving} className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs bg-green-100 text-green-700 hover:bg-green-200 flex items-center space-x-1" title={saving ? '保存中' : '保存'}>
             <Save className="w-3 h-3" />
-            <span>{saving ? '保存中' : '保存'}</span>
+            <span className="hidden sm:inline">{saving ? '保存中' : '保存'}</span>
           </button>
-          <button onClick={() => setPreview(v => !v)} className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center space-x-1">
+          <button onClick={() => setPreview(v => !v)} className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center space-x-1" title={preview ? '编辑' : '预览'}>
             {preview ? <Pencil className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-            <span>{preview ? '编辑' : '预览'}</span>
+            <span className="hidden sm:inline">{preview ? '编辑' : '预览'}</span>
           </button>
           <div className="relative">
-            <button onClick={() => setShowCreate(s => !s)} className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 flex items-center space-x-1">
+            <button onClick={() => setShowCreate(s => !s)} className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 flex items-center space-x-1" title="新建">
               <Plus className="w-3 h-3" />
-              <span>新建</span>
+              <span className="hidden sm:inline">新建</span>
             </button>
             {showCreate && (
               <div className="absolute right-0 mt-1 bg-white border border-gray-200 rounded shadow p-2 flex items-center space-x-2 z-10">
@@ -952,21 +1019,21 @@ export default function NotebookTab() {
           <div className="flex items-center">
             <button
               onClick={() => setTheme('light')}
-              className={`px-2 py-1 rounded-l text-xs flex items-center space-x-1 ${theme === 'light' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-            >
+              className={`px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-l text-xs flex items-center space-x-1 ${theme === 'light' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+              >
               <Sun className="w-3 h-3" />
-              <span>浅色</span>
+              <span className="hidden sm:inline">浅色</span>
             </button>
             <button
               onClick={() => setTheme('dark')}
-              className={`px-2 py-1 rounded-r text-xs flex items-center space-x-1 ${theme === 'dark' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-            >
+              className={`px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-r text-xs flex items-center space-x-1 ${theme === 'dark' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+              >
               <Moon className="w-3 h-3" />
-              <span>深色</span>
+              <span className="hidden sm:inline">深色</span>
             </button>
           </div>
           <div className="flex items-center space-x-1">
-            <div className="flex items-center px-2 py-1 border rounded text-xs bg-white">
+            <div className="flex items-center px-1.5 py-0.5 sm:px-2 sm:py-1 border rounded text-xs bg-white">
               <Search className="w-3 h-3 mr-1 text-gray-500" />
               <input
                 value={searchQuery}
@@ -978,18 +1045,18 @@ export default function NotebookTab() {
                   }
                 }}
                 placeholder="查找"
-                className="outline-none bg-transparent text-gray-700 w-28"
+                className="outline-none bg-transparent text-gray-700 w-20 sm:w-28"
               />
             </div>
             <button
               onClick={() => (!preview ? applyEditorSearch('prev') : gotoPreviewMatch('prev'))}
-              className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center"
+              className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center"
             >
               <ChevronUp className="w-3 h-3" />
             </button>
             <button
               onClick={() => (!preview ? applyEditorSearch('next') : gotoPreviewMatch('next'))}
-              className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center"
+              className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center"
             >
               <ChevronDown className="w-3 h-3" />
             </button>
@@ -1001,7 +1068,7 @@ export default function NotebookTab() {
                   setSearch('')
                 }
               }}
-              className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center"
+              className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center"
             >
               <X className="w-3 h-3" />
             </button>
@@ -1011,7 +1078,7 @@ export default function NotebookTab() {
           </div>
         </div>
       </div>
-      <div className="flex-1 flex overflow-hidden select-none">
+      <div className="flex-1 flex overflow-hidden">
         <div className="border-r border-gray-200 bg-white flex flex-col" style={{ width: `${sidebarWidth}px` }}>
           <div className="p-2 border-b border-gray-100 flex items-center justify-between">
             <div className="text-xs text-gray-600 truncate max-w-[10rem]" title={currentDir}>{currentDir || '未设置目录'}</div>
@@ -1057,7 +1124,7 @@ export default function NotebookTab() {
             window.addEventListener('mousemove', onMove)
             window.addEventListener('mouseup', onUp)
           }}
-          className={`${theme === 'dark' ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'} w-1 cursor-col-resize`}
+          className={`${theme === 'dark' ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'} w-1 cursor-col-resize select-none`}
         />
         <div className="flex-1 p-3 flex flex-col min-h-0 overflow-hidden">
           <div className="text-xs text-gray-500 mb-2">文件：{currentFile || '未选择'}</div>
@@ -1071,7 +1138,7 @@ export default function NotebookTab() {
           ) : (
             <div className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden ${theme === 'dark' ? 'bg-gray-900' : ''}`}>
               <div
-                className={`w-full h-full min-h-0 border rounded p-3 prose prose-sm max-w-none ${theme === 'dark' ? 'border-gray-700 bg-gray-900 text-gray-100 prose-invert' : 'border-gray-200 bg-white text-gray-900'}`}
+                className={`w-full h-full min-h-0 border rounded p-3 prose prose-sm max-w-none ${theme === 'dark' ? 'border-gray-700 bg-gray-900 text-gray-100 prose-invert' : 'border-gray-200 bg-white text-gray-900'} select-text`}
                 dangerouslySetInnerHTML={{ __html: (mdRef.current?.render(content || '')) || '' }}
                 ref={previewRef}
                 onPaste={(e) => {
