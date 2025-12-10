@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"strings"
+    "log"
 
 	"admin-api/shared/utils"
 	"github.com/gin-gonic/gin"
@@ -10,36 +11,49 @@ import (
 
 // AuthMiddleware JWT认证中间件
 func AuthMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// 获取Authorization头
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "缺少认证令牌",
-			})
-			c.Abort()
-			return
-		}
+    return func(c *gin.Context) {
+        authHeader := c.GetHeader("Authorization")
+        var token string
+        var source string
+        if strings.TrimSpace(authHeader) != "" {
+            parts := strings.SplitN(authHeader, " ", 2)
+            if len(parts) == 2 && parts[0] == "Bearer" {
+                token = parts[1]
+                source = "header"
+            }
+        }
+        if token == "" {
+            q := strings.TrimSpace(c.Query("token"))
+            if q != "" {
+                token = q
+                source = "query"
+            }
+        }
+        if token == "" {
+            if ck, err := c.Cookie("admin_token"); err == nil && strings.TrimSpace(ck) != "" {
+                token = ck
+                source = "cookie"
+            }
+        }
+        if token == "" {
+            log.Printf("auth: missing token path=%s", c.Request.URL.Path)
+            c.JSON(http.StatusUnauthorized, gin.H{
+                "error": "缺少认证令牌",
+            })
+            c.Abort()
+            return
+        }
 
-		// 检查Bearer前缀
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "无效的认证令牌格式",
-			})
-			c.Abort()
-			return
-		}
-
-		// 解析令牌
-		claims, err := utils.ParseToken(parts[1])
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "无效的认证令牌",
-			})
-			c.Abort()
-			return
-		}
+        log.Printf("auth: token source=%s len=%d path=%s", source, len(token), c.Request.URL.Path)
+        claims, err := utils.ParseToken(token)
+        if err != nil {
+            log.Printf("auth: invalid token source=%s path=%s", source, c.Request.URL.Path)
+            c.JSON(http.StatusUnauthorized, gin.H{
+                "error": "无效的认证令牌",
+            })
+            c.Abort()
+            return
+        }
 
 		// 将用户信息存储到上下文中
 		c.Set("user_id", claims.AdminID)

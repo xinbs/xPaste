@@ -15,6 +15,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { path: '/users', label: '用户管理', icon: '👥' },
     { path: '/devices', label: '设备管理', icon: '📱' },
     { path: '/clipboard', label: '剪贴板管理', icon: '📋' },
+    { path: '/notebooks', label: '笔记管理', icon: '📝' },
     { path: '/monitoring', label: '系统监控', icon: '📈' }
   ]
 

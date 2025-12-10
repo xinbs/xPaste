@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# pnpm store (全局/本地缓存目录，不需要提交)
+.pnpm-store/
+**/.pnpm-store/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -48,3 +52,4 @@ apps/admin-web/dist/
 services/**/bin/
 services/admin-api/admin-api.exe
 services/sync-api/server.exe
+services/**/tmp/

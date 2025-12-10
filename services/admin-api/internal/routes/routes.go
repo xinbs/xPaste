@@ -13,6 +13,7 @@ func SetupRoutes(r *gin.Engine) {
 	userController := controllers.NewUserController()
 	deviceController := controllers.NewDeviceController()
 	clipboardController := controllers.NewClipboardController()
+	noteController := controllers.NewNoteController()
 
 	// API版本分组
     v1 := r.Group("/api/v1")
@@ -76,6 +77,23 @@ func SetupRoutes(r *gin.Engine) {
 				admins.PUT("/:id", adminController.UpdateAdmin)
 				admins.DELETE("/:id", adminController.DeleteAdmin)
 			}
+
+			// 笔记管理路由（需要管理员权限）
+            notebooks := protected.Group("/notebooks")
+            notebooks.Use(middleware.AdminMiddleware())
+            {
+                // 笔记 CRUD
+                notebooks.GET("", noteController.ListNotes)
+                notebooks.GET("/note/*filename", noteController.GetNote)
+                notebooks.POST("", noteController.SaveNote)
+                notebooks.DELETE("/note/*filename", noteController.DeleteNote)
+
+                // 附件管理
+                notebooks.GET("/attachments", noteController.ListAttachments)
+                notebooks.POST("/attachments", noteController.UploadAttachment)
+                notebooks.DELETE("/attachments/*filename", noteController.DeleteAttachment)
+                notebooks.GET("/attachments/*filename", noteController.DownloadAttachment)
+            }
 		}
 	}
 

@@ -6,6 +6,7 @@ import UserManagement from './pages/UserManagement'
 import DeviceManagement from './pages/DeviceManagement'
 import ClipboardManagement from './pages/ClipboardManagement'
 import SystemMonitoring from './pages/SystemMonitoring'
+import NotebookManagement from './pages/NotebookManagement'
 import Layout from './components/Layout'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import './App.css'
@@ -27,6 +28,7 @@ function AppContent() {
         <Route path="/users" element={<UserManagement />} />
         <Route path="/devices" element={<DeviceManagement />} />
         <Route path="/clipboard" element={<ClipboardManagement />} />
+        <Route path="/notebooks" element={<NotebookManagement />} />
         <Route path="/monitoring" element={<SystemMonitoring />} />
       </Routes>
     </Layout>
@@ -37,7 +39,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <Router>
+        <Router future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
           <AppContent />
         </Router>
       </AuthProvider>
