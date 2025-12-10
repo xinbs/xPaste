@@ -108,6 +108,18 @@ function nowStamp() {
   return `${y}${m}${dd}-${hh}${mm}${ss}`
 }
 
+function localTimeStamp() {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const y = d.getFullYear()
+  const m = pad(d.getMonth() + 1)
+  const dd = pad(d.getDate())
+  const hh = pad(d.getHours())
+  const mm = pad(d.getMinutes())
+  const ss = pad(d.getSeconds())
+  return `${y}-${m}-${dd} ${hh}:${mm}:${ss}`
+}
+
 function sanitizeBase(name: string) {
   return name.replace(/[<>:"/\\|?*\n\r\t]/g, '').replace(/\s+/g, '_')
 }
@@ -298,8 +310,7 @@ export const useNoteFilesStore = create<NoteFilesState>()((set, get) => ({
     try {
       const filePath = get().getDefaultFile()
       if (!filePath) return false
-      const d = new Date()
-      const ts = d.toISOString().replace('T', ' ').slice(0, 19)
+      const ts = localTimeStamp()
       let content = ''
       if (item.type === 'text' && item.content) {
         content = `\n\n${ts}\n\n${item.content}\n`
