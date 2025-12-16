@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"time"
 
 	"admin-api/shared/database"
 	"admin-api/shared/models"
@@ -136,19 +137,31 @@ func (s *ClipboardService) GetClipboardStats() (map[string]interface{}, error) {
 	}
 	stats["total"] = total
 
+	// 总存储字节数（按内容长度字节数统计）
+	var totalSizeBytes int64
+	if err := s.db.Model(&models.Clipboard{}).Select("COALESCE(SUM(LENGTH(content)), 0)").Scan(&totalSizeBytes).Error; err != nil {
+		return nil, err
+	}
+	stats["totalSize"] = totalSizeBytes
+
 	// 按类型统计
 	var typeStats []struct {
-		ContentType string `json:"content_type"`
-		Count       int64  `json:"count"`
+		Type  string `json:"type"`
+		Count int64  `json:"count"`
 	}
-	if err := s.db.Model(&models.Clipboard{}).Select("content_type, count(*) as count").Group("content_type").Scan(&typeStats).Error; err != nil {
+	if err := s.db.Model(&models.Clipboard{}).Select("type as type, count(*) as count").Group("type").Scan(&typeStats).Error; err != nil {
 		return nil, err
 	}
 	stats["by_type"] = typeStats
 
 	// 今日新增
 	var todayCount int64
-	if err := s.db.Model(&models.Clipboard{}).Where("DATE(created_at) = CURDATE()").Count(&todayCount).Error; err != nil {
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	endOfDay := startOfDay.Add(24 * time.Hour)
+	if err := s.db.Model(&models.Clipboard{}).
+		Where("created_at >= ? AND created_at < ?", startOfDay, endOfDay).
+		Count(&todayCount).Error; err != nil {
 		return nil, err
 	}
 	stats["today"] = todayCount
