@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuthStore } from '@/store/auth';
 import { useClipboardStore } from '@/store/clipboard';
 import { useWebSocketStore } from '@/store/websocket';
@@ -12,6 +12,7 @@ import Settings from '@/components/Settings';
 import { useNoteFilesStore } from '@/store/noteFiles';
 import { useToastStore } from '@/store/toast';
 import { useSettingsStore, SETTING_KEYS } from '@/store/settings';
+import apiClient from '@/lib/api';
 
 import NotebookTab from '@/components/NotebookTab';
 
@@ -25,6 +26,12 @@ export default function Dashboard() {
   const [newDeviceName, setNewDeviceName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'text' | 'image' | 'file'>('all');
+
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchPage, setSearchPage] = useState(1);
+  const [searchHasMore, setSearchHasMore] = useState(false);
+  const [searchLoadingMore, setSearchLoadingMore] = useState(false);
   
   const { user, devices, currentDevice, logout, fetchDevices, renameDevice, deleteDevice, isAuthenticated, registerDevice, token } = useAuthStore();
   const { 
@@ -49,6 +56,8 @@ export default function Dashboard() {
   const clipboardScrollRef = useRef<HTMLDivElement | null>(null);
   const clipboardSentinelRef = useRef<HTMLDivElement | null>(null);
   const [showAppMenu, setShowAppMenu] = useState(false);
+
+  const searchControllerRef = useRef<AbortController | null>(null);
 
   // 使用 useRef 存储最新的 token，以便在事件回调中访问
   const tokenRef = useRef(token);
@@ -141,6 +150,103 @@ export default function Dashboard() {
       }
     } catch {}
   }, []);
+
+  const performSearch = useCallback(
+    async (query: string, page: number, append: boolean) => {
+      const trimmed = query.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      if (searchControllerRef.current) {
+        searchControllerRef.current.abort();
+      }
+
+      const controller = new AbortController();
+      searchControllerRef.current = controller;
+
+      if (page === 1) {
+        setIsSearching(true);
+      } else {
+        setSearchLoadingMore(true);
+      }
+
+      try {
+        const response = await apiClient.searchClipItems(
+          { q: trimmed, page, limit: 20 },
+          controller.signal
+        );
+
+        if (!response.success) {
+          useToastStore.getState().showError('搜索失败', response.message || '搜索请求失败');
+          return;
+        }
+
+        const items = (response.data && response.data.items) || [];
+        const pagination = response.data && response.data.pagination;
+
+        setSearchResults((prev) => (append ? [...prev, ...items] : items));
+
+        if (pagination) {
+          const currentPage = pagination.page || page;
+          const totalPages = pagination.total_pages || 1;
+          setSearchPage(currentPage);
+          setSearchHasMore(currentPage < totalPages);
+        } else {
+          setSearchPage(page);
+          setSearchHasMore(items.length > 0);
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : '搜索失败';
+        if (message === '请求超时或被取消') {
+          return;
+        }
+        useToastStore.getState().showError('搜索失败', message);
+      } finally {
+        if (page === 1) {
+          setIsSearching(false);
+        } else {
+          setSearchLoadingMore(false);
+        }
+      }
+    },
+    []
+  );
+
+  const loadMoreSearchResults = useCallback(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) return;
+    if (!searchHasMore) return;
+    if (searchLoadingMore || isSearching) return;
+    const nextPage = searchPage + 1;
+    performSearch(trimmed, nextPage, true);
+  }, [searchQuery, searchHasMore, searchLoadingMore, isSearching, searchPage, performSearch]);
+
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+
+    if (!trimmed) {
+      if (searchControllerRef.current) {
+        searchControllerRef.current.abort();
+        searchControllerRef.current = null;
+      }
+      setSearchResults([]);
+      setIsSearching(false);
+      setSearchPage(1);
+      setSearchHasMore(false);
+      setSearchLoadingMore(false);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      performSearch(trimmed, 1, false);
+    }, 300);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [searchQuery, performSearch]);
 
   useEffect(() => {
     // 早期注册：确保尽快响应主进程的 Token 请求，避免在初次保存时丢失请求
@@ -261,19 +367,26 @@ export default function Dashboard() {
     };
   }, []);
 
-  // 无限滚动
   useEffect(() => {
     if (activeTab !== 'clipboard') return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isLoadingMore && !clipboardLoading) {
-          console.log('滚动到底部，加载更多...');
-          loadMoreItems();
+        if (!entries[0].isIntersecting) return;
+        const trimmed = searchQuery.trim();
+        if (trimmed) {
+          if (searchHasMore && !searchLoadingMore && !isSearching) {
+            loadMoreSearchResults();
+          }
+        } else {
+          if (hasMore && !isLoadingMore && !clipboardLoading) {
+            console.log('滚动到底部，加载更多...');
+            loadMoreItems();
+          }
         }
       },
-      { 
+      {
         root: clipboardScrollRef.current,
-        threshold: 1.0 
+        threshold: 1.0,
       }
     );
 
@@ -285,7 +398,18 @@ export default function Dashboard() {
     return () => {
       observer.disconnect();
     };
-  }, [activeTab, hasMore, isLoadingMore, clipboardLoading, loadMoreItems]);
+  }, [
+    activeTab,
+    searchQuery,
+    searchHasMore,
+    searchLoadingMore,
+    isSearching,
+    hasMore,
+    isLoadingMore,
+    clipboardLoading,
+    loadMoreItems,
+    loadMoreSearchResults,
+  ]);
 
   const handleAddTextItem = async () => {
     if (!newClipText.trim()) return;
@@ -339,8 +463,15 @@ export default function Dashboard() {
   };
 
   const handleDeleteItem = async (id: string) => {
-    if (confirm('确定要删除这个剪贴板项吗？')) {
-      await deleteClipItem(id);
+    if (!confirm('确定要删除这个剪贴板项吗？')) {
+      return;
+    }
+    const success = await deleteClipItem(id);
+    if (success) {
+      const trimmed = searchQuery.trim();
+      if (trimmed) {
+        setSearchResults((prev) => prev.filter((item) => String(item.id) !== String(id)));
+      }
     }
   };
 
@@ -356,15 +487,13 @@ export default function Dashboard() {
     return new Date(dateString).toLocaleString('zh-CN');
   };
 
-  // 过滤剪贴板项
-  const filteredClipItems = clipItems.filter(item => {
-    const matchesSearch = !searchQuery || 
-      item.content?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.file_path?.toLowerCase().includes(searchQuery.toLowerCase());
-    
+  const trimmedSearch = searchQuery.trim();
+  const isUsingSearch = trimmedSearch.length > 0;
+  const baseItems = isUsingSearch ? searchResults : clipItems;
+
+  const filteredClipItems = baseItems.filter(item => {
     const matchesType = typeFilter === 'all' || item.type === typeFilter;
-    
-    return matchesSearch && matchesType;
+    return matchesType;
   });
 
   const renderClipboardTab = () => {
@@ -413,7 +542,7 @@ export default function Dashboard() {
 
         {/* 主内容区域 */}
         <div ref={clipboardScrollRef} className="flex-1 overflow-y-auto p-1 scrollbar-thin">
-          {clipboardLoading && filteredClipItems.length === 0 ? (
+          {(isUsingSearch ? isSearching : clipboardLoading) && filteredClipItems.length === 0 ? (
             <div className="flex items-center justify-center h-32">
               <div className="text-center">
                 <RefreshCw className="w-6 h-6 animate-spin text-blue-500 mx-auto mb-1" />
@@ -570,10 +699,9 @@ export default function Dashboard() {
             </div>
           )}
 
-          {hasMore && <div ref={clipboardSentinelRef} style={{ height: "1px" }} />}
+          {(isUsingSearch ? searchHasMore : hasMore) && <div ref={clipboardSentinelRef} style={{ height: "1px" }} />}
 
-          {/* Loading indicator for pagination */}
-          {clipboardLoading && filteredClipItems.length > 0 && (
+          {(isUsingSearch ? searchLoadingMore : clipboardLoading) && filteredClipItems.length > 0 && (
              <div className="flex items-center justify-center py-4">
                 <RefreshCw className="w-5 h-5 animate-spin text-blue-500" />
              </div>
@@ -1077,10 +1205,9 @@ export default function Dashboard() {
                     onClick={async () => {
                       setShowAppMenu(false);
                       try {
-                        if (window.electronAPI && (window.electronAPI as any).syncCloseBehavior) {
-                          await (window.electronAPI as any).syncCloseBehavior({ close_action: 'quit' });
-                        }
-                        if (window.electronAPI && window.electronAPI.closeWindow) {
+                        if (window.electronAPI && (window.electronAPI as any).quitApp) {
+                          await (window.electronAPI as any).quitApp();
+                        } else if (window.electronAPI && window.electronAPI.closeWindow) {
                           await window.electronAPI.closeWindow();
                         } else {
                           window.close();

@@ -78,11 +78,37 @@ class ApiClient {
 
   setToken(token: string) {
     this.token = token;
+    // 更新Zustand认证存储中的token
+    try {
+      const authStorage = localStorage.getItem('auth-storage');
+      if (authStorage) {
+        const authData = JSON.parse(authStorage);
+        authData.state.token = token;
+        localStorage.setItem('auth-storage', JSON.stringify(authData));
+      }
+    } catch (error) {
+      console.error('更新token失败:', error);
+    }
   }
 
   clearToken() {
     this.token = null;
     this.refreshTokenValue = null;
+    // 清除Zustand认证存储中的token
+    try {
+      const authStorage = localStorage.getItem('auth-storage');
+      if (authStorage) {
+        const authData = JSON.parse(authStorage);
+        if (authData.state) {
+          authData.state.token = null;
+          authData.state.refreshToken = null;
+          authData.state.isAuthenticated = false;
+          localStorage.setItem('auth-storage', JSON.stringify(authData));
+        }
+      }
+    } catch (error) {
+      console.error('清除token失败:', error);
+    }
   }
   
   // 刷新token（从存储重新加载）
@@ -102,9 +128,6 @@ class ApiClient {
 
     if (this.token) {
       (headers as Record<string, string>).Authorization = `Bearer ${this.token}`;
-      // console.log(`[API] Requesting ${endpoint} with token: ${this.token.substring(0, 10)}...`);
-    } else {
-      // console.log(`[API] Requesting ${endpoint} without token`);
     }
 
     const { signal, ...restOptions } = options;
@@ -129,7 +152,6 @@ class ApiClient {
 
       if (!response.ok) {
         if (response.status === 401) {
-          console.warn(`[API] 401 Unauthorized for ${endpoint}`);
           // 如果是登录接口本身，直接抛出错误
           if (endpoint.includes('/auth/login')) {
              const errorData = await response.json().catch(() => ({}));
@@ -237,6 +259,9 @@ class ApiClient {
     
     if (response.success && response.data.access_token) {
       this.setToken(response.data.access_token);
+      if (response.data.refresh_token) {
+        this.setRefreshToken(response.data.refresh_token);
+      }
     }
     
     return response;
@@ -315,13 +340,27 @@ class ApiClient {
   async getClipItems(params: { page: number; pageSize: number }, signal?: AbortSignal) {
     const query = new URLSearchParams({
       page: String(params.page),
-      page_size: String(params.pageSize),
+      limit: String(params.pageSize),
     }).toString();
     return this.request<{
       success: boolean;
       message: string;
       data: { items: any[]; pagination: any };
     }>(`/clips?${query}`, {
+      signal,
+    });
+  }
+
+  async searchClipItems(params: { q: string; page?: number; limit?: number }, signal?: AbortSignal) {
+    const query = new URLSearchParams();
+    query.set('q', params.q);
+    if (params.page != null) query.set('page', String(params.page));
+    if (params.limit != null) query.set('limit', String(params.limit));
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: { items: any[]; pagination: any };
+    }>(`/clips/search?${query.toString()}`, {
       signal,
     });
   }
@@ -339,6 +378,16 @@ class ApiClient {
     }>('/clips', {
       method: 'POST',
       body: JSON.stringify(clipData),
+    });
+  }
+
+  async deleteClipItem(id: string | number) {
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: any;
+    }>(`/clips/${id}`, {
+      method: 'DELETE',
     });
   }
 
@@ -367,17 +416,65 @@ class ApiClient {
     return response.json();
   }
 
-  async uploadNotebookAttachment(blob: Blob, opts: { filename: string; noteDir?: string; pathRel?: string; useData?: boolean; subdir?: string }) {
-    const formData = new FormData();
-    formData.append('file', blob, opts.filename);
-    if (opts.filename) formData.append('filename', opts.filename);
-    if (opts.noteDir) formData.append('note_dir', opts.noteDir);
-    if (opts.pathRel) formData.append('path_rel', opts.pathRel);
-    if (opts.subdir) formData.append('subdir', opts.subdir);
+  // 笔记本同步：推送单条笔记
+  async pushNotebookNote(
+    content: string,
+    opts: { filename: string; noteDir?: string; useData?: boolean }
+  ) {
+    const payload = {
+      content,
+      filename: opts.filename,
+      note_dir: opts.noteDir || '',
+      use_data: !!opts.useData,
+    };
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: any;
+    }>('/notes/push', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
 
-    const params = new URLSearchParams();
-    if (opts.useData) params.set('use_data', 'true');
-    const url = `${this.getBaseURL()}/uploads/file${params.toString() ? `?${params.toString()}` : ''}`;
+  // 笔记本同步：批量推送笔记
+  async pushNotebookNotesBatch(
+    items: { content: string; filename: string; note_dir?: string; use_data?: boolean }[]
+  ) {
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: any;
+    }>('/notes/push-batch', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    });
+  }
+
+  // 笔记本附件上传
+  async uploadNotebookAttachment(
+    fileData: Blob | File,
+    opts: { filename?: string; noteDir?: string; pathRel?: string; subdir?: string; useData?: boolean } = {}
+  ) {
+    const formData = new FormData();
+    const name = opts.filename || `attachment-${Date.now()}`;
+    const blob = fileData instanceof Blob ? fileData : new Blob([fileData], { type: (fileData as any).type || 'application/octet-stream' });
+    formData.append('file', blob, name);
+    if (opts.filename) formData.append('filename', opts.filename);
+    if (typeof opts.noteDir === 'string') formData.append('note_dir', opts.noteDir);
+    if (typeof opts.pathRel === 'string') formData.append('path_rel', opts.pathRel);
+    if (typeof opts.subdir === 'string') formData.append('subdir', opts.subdir);
+    if (opts.useData) formData.append('use_data', 'true');
+
+    const query = new URLSearchParams();
+    if (opts.useData) query.set('use_data', 'true');
+    if (opts.subdir) query.set('subdir', opts.subdir);
+    if (opts.noteDir) query.set('note_dir', opts.noteDir);
+    if (opts.pathRel) query.set('path_rel', opts.pathRel);
+    if (opts.filename) query.set('filename', opts.filename);
+    const qs = query.toString() ? `?${query.toString()}` : '';
+
+    const url = `${this.getBaseURL()}/uploads/file${qs}`;
     const headers: HeadersInit = {};
     if (this.token) {
       (headers as Record<string, string>).Authorization = `Bearer ${this.token}`;
@@ -394,60 +491,18 @@ class ApiClient {
     return response.json();
   }
 
-  async pushNotebookNote(content: string, opts: { filename: string; noteDir?: string; useData?: boolean }) {
-    const body = {
-      content,
-      filename: opts.filename,
-      note_dir: opts.noteDir || '',
-      use_data: !!opts.useData,
-    } as any;
-    return this.request<{
-      success: boolean;
-      message: string;
-      data: any;
-    }>(`/notes/push`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-  }
-
-  async pushNotebookNotesBatch(items: { content: string; filename: string; note_dir?: string; use_data?: boolean }[]) {
-    const body = { items } as any;
-    return this.request<{
-      success: boolean;
-      message: string;
-      data: any;
-    }>(`/notes/push-batch`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-  }
-
-  async listNotebookNotes(opts: { noteDir?: string; useData?: boolean }) {
-    const params = new URLSearchParams();
-    if (opts.noteDir) params.set('note_dir', opts.noteDir);
-    if (opts.useData) params.set('use_data', 'true');
-    return this.request<{
-      success: boolean;
-      message: string;
-      data: { items: string[]; count: number };
-    }>(`/notes/list${params.toString() ? `?${params.toString()}` : ''}`, {
-      method: 'GET',
-    });
-  }
-
+  // 获取云端笔记内容
   async getNotebookNote(opts: { filename: string; noteDir?: string; useData?: boolean }) {
     const params = new URLSearchParams();
     params.set('filename', opts.filename);
     if (opts.noteDir) params.set('note_dir', opts.noteDir);
     if (opts.useData) params.set('use_data', 'true');
+    const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request<{
       success: boolean;
       message: string;
-      data: { content: string; filename: string; note_dir: string };
-    }>(`/notes/get?${params.toString()}`, {
-      method: 'GET',
-    });
+      data: any;
+    }>(`/notes/get${qs}`, { method: 'GET' });
   }
 
   // 健康检查

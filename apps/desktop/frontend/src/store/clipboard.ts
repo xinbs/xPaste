@@ -181,12 +181,16 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
   deleteItem: async (id: string) => {
     set({ error: null });
     try {
-      // 这里需要后端实现删除API
-      // const response = await apiClient.deleteClipItem(id);
-      // 暂时从本地状态中移除
-      const currentItems = get().items;
-      set({ items: currentItems.filter(item => item.id !== id) });
-      return true;
+      const response = await apiClient.deleteClipItem(id);
+      if (response.success) {
+        const currentItems = get().items;
+        set({ items: currentItems.filter(item => String(item.id) !== String(id)) });
+        return true;
+      } else {
+        set({ error: response.message });
+        useToastStore.getState().showError('删除剪贴板项失败', response.message);
+        return false;
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '删除剪贴板项失败';
       set({ error: errorMessage });

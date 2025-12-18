@@ -6,6 +6,7 @@ export interface ElectronAPI {
   showOpenDialog: (options: any) => Promise<any>;
   openSettingsWindow: () => Promise<void>;
   showMainWindow: () => Promise<{ success: boolean; error?: string }>;
+  quitApp: () => Promise<{ success: boolean; error?: string }>;
   
   // 窗口控制
   minimizeWindow: () => Promise<void>;

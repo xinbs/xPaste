@@ -1341,6 +1341,16 @@ ipcMain.handle('update-close-behavior', (event, behavior) => {
   }
 });
 
+ipcMain.handle('quit-app', () => {
+  try {
+    app.isQuiting = true;
+    app.quit();
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err?.message || '退出应用失败' };
+  }
+});
+
 ipcMain.handle('show-main-window', () => {
   try {
     showMainWindow();

@@ -336,7 +336,9 @@ export const useNoteFilesStore = create<NoteFilesState>()((set, get) => ({
                 : fileName.toLowerCase().endsWith('.png') ? 'image/png'
                 : fileName.toLowerCase().endsWith('.webp') ? 'image/webp'
                 : 'application/octet-stream'
-              const blobU = new Blob([read.data], { type: typeGuess })
+              const u8 = new Uint8Array(read.data as unknown as ArrayBuffer)
+              const buf = (u8.buffer as ArrayBuffer).slice(u8.byteOffset, u8.byteOffset + u8.byteLength)
+              const blobU = new Blob([buf], { type: typeGuess })
               await apiClient.uploadNotebookAttachment(blobU, { filename: fileName, noteDir, pathRel, useData: true })
             }
           }
@@ -418,7 +420,7 @@ export const useNoteFilesStore = create<NoteFilesState>()((set, get) => ({
       if (pushed > 0) {
         for (const r of results) {
           if (r && r.success) {
-            const key = toUnix(r.NoteDir ? `${r.NoteDir}/${r.FileName}` : r.FileName)
+            const key = toUnix(r.note_dir ? `${r.note_dir}/${r.filename}` : r.filename)
             const h = keyHashMap[key]
             if (h) idx.notes[key] = h
           }
@@ -460,7 +462,9 @@ export const useNoteFilesStore = create<NoteFilesState>()((set, get) => ({
           const relWithin = toUnix(abs).slice(toUnix(attRoot).length).replace(/^\//, '')
           const relDirWithin = relWithin.split('/').slice(0, -1).join('/')
           const pathRel = relDirWithin ? `attachments/${relDirWithin}` : 'attachments'
-          const blobU = new Blob([read.data], { type: guessMimeFromName(fileName) })
+          const u8 = new Uint8Array(read.data as unknown as ArrayBuffer)
+          const buf = (u8.buffer as ArrayBuffer).slice(u8.byteOffset, u8.byteOffset + u8.byteLength)
+          const blobU = new Blob([buf], { type: guessMimeFromName(fileName) })
           await apiClient.uploadNotebookAttachment(blobU, { filename: fileName, noteDir, pathRel, useData: true })
           uploaded++
         } catch {
