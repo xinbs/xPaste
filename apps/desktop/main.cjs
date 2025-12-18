@@ -270,6 +270,8 @@ let clipboardMonitorInterval;
 let lastClipboardText = '';
 let lastClipboardImage = '';
 let lastClipboardFileHash = '';
+let recentFileHashTimes = new Map();
+const FILE_DUP_TTL_MS = 8000;
 
 // API 相关
 let authToken = null;
@@ -285,7 +287,7 @@ function flushPendingQueue() {
     const queue = [...pendingSaveQueue];
     pendingSaveQueue = [];
     queue.forEach(item => {
-      saveClipItemToApi(item.type, item.content).then(saved => {
+      saveClipItemToApi(item.type, item.content, item.filePath).then(saved => {
         if (saved && mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('clipboard-changed', {
             type: item.type,
@@ -300,7 +302,7 @@ function flushPendingQueue() {
     console.error('处理待保存队列时出错:', err);
   }
 }
-async function saveClipItemToApi(type, content) {
+async function saveClipItemToApi(type, content, filePath) {
   if (!authToken) {
     // 仅在磁盘模式下尝试从磁盘恢复 Token
     if (TOKEN_STORAGE_MODE === 'disk') {
@@ -315,7 +317,9 @@ async function saveClipItemToApi(type, content) {
           console.warn('主进程尝试保存剪贴板，但 AuthToken 未设置。将数据加入待保存队列。');
           
           // 加入队列
-          pendingSaveQueue.push({ type, content, timestamp: Date.now() });
+          if (!pendingSaveQueue.some(i => i.type === type && i.content === content)) {
+            pendingSaveQueue.push({ type, content, filePath, timestamp: Date.now() });
+          }
           
           // 尝试请求 Token
           if (mainWindow && !mainWindow.isDestroyed()) {
@@ -327,7 +331,9 @@ async function saveClipItemToApi(type, content) {
     } else {
       // 内存模式：直接入队并请求渲染进程提供 Token
       console.warn('主进程尝试保存剪贴板，但 AuthToken 未设置（内存模式）。将数据加入待保存队列。');
-      pendingSaveQueue.push({ type, content, timestamp: Date.now() });
+      if (!pendingSaveQueue.some(i => i.type === type && i.content === content)) {
+        pendingSaveQueue.push({ type, content, filePath, timestamp: Date.now() });
+      }
       if (mainWindow && !mainWindow.isDestroyed()) {
         console.log('主进程向渲染进程请求 Token（内存模式）...');
         mainWindow.webContents.send('request-token');
@@ -359,6 +365,7 @@ async function saveClipItemToApi(type, content) {
       body: JSON.stringify({
         type,
         content,
+        file_path: filePath,
         metadata: {
           source: 'desktop_main_process',
           auto_detected: true,
@@ -414,7 +421,45 @@ function startClipboardMonitoring(window) {
   clipboardMonitorInterval = setInterval(() => {
     if (!window || window.isDestroyed()) return;
 
-    // 1. 检查文本
+    // 1. 先检查文件剪贴板（避免将文件图标误识别为图片或文件名文本）
+    try {
+      const bufFileUrl = clipboard.readBuffer('public.file-url');
+      const bufNsFiles = clipboard.readBuffer('NSFilenamesPboardType');
+      let raw = '';
+      if (bufFileUrl && bufFileUrl.length > 0) {
+        raw = bufFileUrl.toString('utf8');
+      } else if (bufNsFiles && bufNsFiles.length > 0) {
+        raw = bufNsFiles.toString('utf8');
+      }
+      if (raw && raw.trim().length > 0) {
+        const parts = raw.split(/[\r\n\u0000]+/).filter(Boolean);
+        const paths = parts.map(p => {
+          try {
+            if (p.startsWith('file://')) {
+              const u = new URL(p);
+              return decodeURI(u.pathname);
+            }
+            return decodeURI(p);
+          } catch {
+            return p;
+          }
+        }).filter(Boolean);
+        // 为稳定去重，排序后拼接
+        const hash = paths.slice().sort().join('|');
+        const now = Date.now();
+        const lastTime = recentFileHashTimes.get(hash) || 0;
+        if (hash && (hash !== lastClipboardFileHash || now - lastTime > FILE_DUP_TTL_MS)) {
+          recentFileHashTimes.set(hash, now);
+          lastClipboardFileHash = hash;
+          try { lastClipboardText = clipboard.readText() || lastClipboardText } catch {}
+          lastClipboardImage = '';
+        }
+        // 有文件时，直接返回，避免文本/图片分支重复记录
+        return;
+      }
+    } catch (_) { /* ignore */ }
+
+    // 2. 检查文本
     const text = clipboard.readText();
     if (text && text !== lastClipboardText) {
       lastClipboardText = text;
@@ -449,56 +494,6 @@ function startClipboardMonitoring(window) {
       
       return;
     }
-
-    // 2. 检查是否为文件（macOS 常见：public.file-url / NSFilenamesPboardType）
-    try {
-      const bufFileUrl = clipboard.readBuffer('public.file-url');
-      const bufNsFiles = clipboard.readBuffer('NSFilenamesPboardType');
-      let raw = '';
-      if (bufFileUrl && bufFileUrl.length > 0) {
-        raw = bufFileUrl.toString('utf8');
-      } else if (bufNsFiles && bufNsFiles.length > 0) {
-        raw = bufNsFiles.toString('utf8');
-      }
-      if (raw && raw.trim().length > 0) {
-        // 可能包含多条，以换行或空字符分隔；内容形如 file:///... 或直接绝对路径
-        const parts = raw.split(/[\r\n\u0000]+/).filter(Boolean);
-        const paths = parts.map(p => {
-          try {
-            if (p.startsWith('file://')) {
-              const u = new URL(p);
-              return decodeURI(u.pathname);
-            }
-            // 普通绝对路径
-            return decodeURI(p);
-          } catch {
-            return p;
-          }
-        }).filter(Boolean);
-        const hash = paths.join('|');
-        if (hash && hash !== lastClipboardFileHash) {
-          lastClipboardFileHash = hash;
-          // 清除文本与图片记录，避免误记文件图标为图片
-          lastClipboardText = '';
-          lastClipboardImage = '';
-          try {
-            console.log('检测到剪贴板文件变化 (后台监控)', {
-              count: paths.length,
-              first: paths[0]
-            });
-          } catch (_) {}
-          // 通知渲染进程（目前前端忽略 file 类型，仅用于阻止图片记录）
-          window.webContents.send('clipboard-changed', {
-            type: 'file',
-            content: JSON.stringify({ paths }),
-            timestamp: Date.now(),
-            savedByMain: false
-          });
-        }
-        // 有文件时，不再检查图片，避免记录文件图标占位图
-        return;
-      }
-    } catch (_) { /* ignore */ }
 
     // 3. 检查图片 (仅当没有文本/文件时)
     // 通常剪贴板要么是文本要么是图片

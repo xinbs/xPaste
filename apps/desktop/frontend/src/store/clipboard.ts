@@ -46,6 +46,9 @@ let monitoringInterval: NodeJS.Timeout | null = null;
 let lastClipboardContent = '';
 let lastClipboardImageHash = '';
 let clipboardIpcHandler: any = null;
+let lastClipboardFileHash = '';
+let lastFileAt = 0;
+const FILE_DUP_TTL_MS = 8000;
 
 export const useClipboardStore = create<ClipboardState>()((set, get) => ({
   items: [],
@@ -233,6 +236,10 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
             } else if (data.type === 'image') {
                 lastClipboardImageHash = data.content;
                 lastClipboardContent = '';
+            } else if (data.type === 'file') {
+                lastClipboardFileHash = data.content || '';
+                lastClipboardContent = '';
+                lastClipboardImageHash = '';
             }
             
             get().fetchItems();
@@ -302,6 +309,33 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
                  window.electronAPI.log('添加图片记录失败', { error: err.message });
                }
                console.error(err);
+            });
+          }
+        } else if (data.type === 'file') {
+          const now = Date.now();
+          const content = data.content || '';
+          if (content && (content !== lastClipboardFileHash || now - lastFileAt > FILE_DUP_TTL_MS)) {
+            lastClipboardFileHash = content;
+            lastFileAt = now;
+            lastClipboardContent = '';
+            lastClipboardImageHash = '';
+            let paths: string[] = [];
+            try {
+              const parsed = JSON.parse(content);
+              if (parsed && Array.isArray(parsed.paths)) paths = parsed.paths;
+            } catch {}
+            get().addItem({
+              type: 'file',
+              content,
+              file_path: paths[0] || '',
+              metadata: {
+                source: 'electron_monitor',
+                auto_detected: true,
+              },
+            }).catch(err => {
+              if (window.electronAPI && window.electronAPI.log) {
+                window.electronAPI.log('添加文件记录失败', { error: err.message });
+              }
             });
           }
         }

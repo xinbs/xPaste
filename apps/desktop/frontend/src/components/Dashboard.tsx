@@ -3,7 +3,7 @@ import { useAuthStore } from '@/store/auth';
 import { useClipboardStore } from '@/store/clipboard';
 import { useWebSocketStore } from '@/store/websocket';
 import { useConfigStore } from '@/store/config';
-import { Copy, Monitor, LogOut, Plus, Trash2, Upload, Play, Pause, X, RefreshCw, Edit2, Settings as SettingsIcon, Search, Type, Image as ImageIcon, FileText, Save } from 'lucide-react';
+import { Copy, Monitor, LogOut, Plus, Trash2, Upload, Play, Pause, X, RefreshCw, Edit2, Settings as SettingsIcon, Search, Type, Image as ImageIcon, FileText, Save, MoreVertical } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import FileUpload, { FilePreview } from '@/components/FileUpload';
 import WebSocketStatus from '@/components/WebSocketStatus';
@@ -11,6 +11,7 @@ import WindowControls from '@/components/WindowControls';
 import Settings from '@/components/Settings';
 import { useNoteFilesStore } from '@/store/noteFiles';
 import { useToastStore } from '@/store/toast';
+import { useSettingsStore, SETTING_KEYS } from '@/store/settings';
 
 import NotebookTab from '@/components/NotebookTab';
 
@@ -47,6 +48,7 @@ export default function Dashboard() {
 
   const clipboardScrollRef = useRef<HTMLDivElement | null>(null);
   const clipboardSentinelRef = useRef<HTMLDivElement | null>(null);
+  const [showAppMenu, setShowAppMenu] = useState(false);
 
   // 使用 useRef 存储最新的 token，以便在事件回调中访问
   const tokenRef = useRef(token);
@@ -130,6 +132,15 @@ export default function Dashboard() {
       });
     }
   }, [serverConfig.baseUrl]);
+
+  useEffect(() => {
+    try {
+      const action = useSettingsStore.getState().getSetting(SETTING_KEYS.USER_CLOSE_BEHAVIOR, 'minimize');
+      if (window.electronAPI && (window.electronAPI as any).syncCloseBehavior) {
+        (window.electronAPI as any).syncCloseBehavior({ close_action: action });
+      }
+    } catch {}
+  }, []);
 
   useEffect(() => {
     // 早期注册：确保尽快响应主进程的 Token 请求，避免在初次保存时丢失请求
@@ -1038,26 +1049,51 @@ export default function Dashboard() {
               <span className="text-xs text-gray-600 truncate max-w-20" title={user?.username}>
                 {user?.username}
               </span>
-              <button
-                onClick={logout}
-                className="inline-flex items-center px-1.5 py-1 text-xs font-medium rounded text-red-600 hover:bg-red-50 transition-colors"
-                title="退出登录"
-              >
-                <LogOut className="w-3 h-3" />
-              </button>
             </div>
             {/* 移动端简化版 */}
-            <div className="md:hidden">
-              <button
-                onClick={logout}
-                className="inline-flex items-center p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
-                title="退出登录"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            </div>
+            <div className="md:hidden"></div>
             
             {/* 窗口控制按钮 - 仅在生产模式显示 */}
+            <div className="relative">
+              <button
+                onClick={() => setShowAppMenu((v) => !v)}
+                className="inline-flex items-center p-1 rounded hover:bg-gray-100 text-gray-700"
+                title="更多"
+              >
+                <MoreVertical className="w-4 h-4" />
+              </button>
+              {showAppMenu && (
+                <div className="absolute right-0 mt-1 w-32 bg-white border border-gray-200 rounded shadow-lg z-50">
+                  <button
+                    onClick={() => {
+                      setShowAppMenu(false);
+                      logout();
+                    }}
+                    className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100"
+                  >
+                    退出账号
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setShowAppMenu(false);
+                      try {
+                        if (window.electronAPI && (window.electronAPI as any).syncCloseBehavior) {
+                          await (window.electronAPI as any).syncCloseBehavior({ close_action: 'quit' });
+                        }
+                        if (window.electronAPI && window.electronAPI.closeWindow) {
+                          await window.electronAPI.closeWindow();
+                        } else {
+                          window.close();
+                        }
+                      } catch {}
+                    }}
+                    className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100"
+                  >
+                    退出程序
+                  </button>
+                </div>
+              )}
+            </div>
             <WindowControls className="ml-2 pl-2 border-l border-gray-200" />
           </div>
         </div>
