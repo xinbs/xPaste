@@ -24,19 +24,37 @@ Set-Location $scriptRoot
 Write-Host "📍 工作目录: $scriptRoot" -ForegroundColor Cyan
 
 Write-Host "[1/4] Stop running Electron/xPaste processes..." -ForegroundColor Cyan
-$procNames = @('xPaste','electron')
-foreach ($n in $procNames) {
-  Get-Process -Name $n -ErrorAction SilentlyContinue | ForEach-Object {
-    try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } catch {}
-  }
-}
-Start-Sleep -Milliseconds 800
 $outDir = Join-Path $scriptRoot 'dist-electron'
+$targetPathPattern = [Regex]::Escape($outDir)
+$procNames = @('xPaste','electron','Electron')
+$procsToStop = @()
+foreach ($n in $procNames) {
+  $procsToStop += @(Get-Process -Name $n -ErrorAction SilentlyContinue)
+}
+$procsToStop += @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and ($_.Path -match $targetPathPattern) })
+$procsToStop | Sort-Object -Property Id -Unique | ForEach-Object {
+  try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } catch {}
+}
+Start-Sleep -Milliseconds 1200
+
 if (Test-Path $outDir) {
-  try {
-    Remove-Item -LiteralPath $outDir -Recurse -Force -ErrorAction Stop
-  } catch {
-    Write-Host "Warning: cannot clean output dir, continue" -ForegroundColor Yellow
+  $cleaned = $false
+  for ($i = 0; $i -lt 12; $i++) {
+    try {
+      Remove-Item -LiteralPath $outDir -Recurse -Force -ErrorAction Stop
+      $cleaned = $true
+      break
+    } catch {
+      $locking = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and ($_.Path -match $targetPathPattern) })
+      $locking | ForEach-Object {
+        try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } catch {}
+      }
+      Start-Sleep -Milliseconds 600
+    }
+  }
+  if (-not $cleaned) {
+    Write-Host "Cannot clean output dir: $outDir" -ForegroundColor Red
+    exit 1
   }
 }
 
