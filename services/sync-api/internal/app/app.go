@@ -178,26 +178,23 @@ func (a *App) startCleanupTasks() {
 		ticker := time.NewTicker(a.config.Sync.CleanupInterval)
 		defer ticker.Stop()
 
-		for {
-			select {
-			case <-ticker.C:
-				// 执行过期项清理
-				if err := a.services.Clip.CleanupExpiredClipItems(); err != nil {
-					logger.Errorf("Failed to cleanup expired clip items: %v", err)
-				}
-
-				// 执行用户自动清理
-				if err := a.services.Clip.AutoCleanupForAllUsers(); err != nil {
-					logger.Errorf("Failed to auto cleanup for users: %v", err)
-				}
-
-				// 清理离线设备
-				if err := a.services.Device.CleanupOfflineDevices(24 * time.Hour); err != nil {
-					logger.Errorf("Failed to cleanup offline devices: %v", err)
-				}
-
-				logger.Debug("Cleanup tasks completed")
+		for range ticker.C {
+			// 执行过期项清理
+			if err := a.services.Clip.CleanupExpiredClipItems(); err != nil {
+				logger.Errorf("Failed to cleanup expired clip items: %v", err)
 			}
+
+			// 执行用户自动清理
+			if err := a.services.Clip.AutoCleanupForAllUsers(); err != nil {
+				logger.Errorf("Failed to auto cleanup for users: %v", err)
+			}
+
+			// 清理离线设备
+			if err := a.services.Device.CleanupOfflineDevices(24 * time.Hour); err != nil {
+				logger.Errorf("Failed to cleanup offline devices: %v", err)
+			}
+
+			logger.Debug("Cleanup tasks completed")
 		}
 	}()
 }

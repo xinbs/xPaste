@@ -102,9 +102,7 @@ func (m *Manager) Unregister(client *Client) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, ok := m.clients[client.ID]; ok {
-		delete(m.clients, client.ID)
-	}
+	delete(m.clients, client.ID)
 
 	if clients, ok := m.userClients[client.UserID]; ok {
 		for i, c := range clients {
@@ -118,9 +116,7 @@ func (m *Manager) Unregister(client *Client) {
 		}
 	}
 
-	if _, ok := m.deviceClients[m.deviceKey(client.UserID, client.DeviceID)]; ok {
-		delete(m.deviceClients, m.deviceKey(client.UserID, client.DeviceID))
-	}
+	delete(m.deviceClients, m.deviceKey(client.UserID, client.DeviceID))
 }
 
 // Run 运行管理器
@@ -200,26 +196,6 @@ func (m *Manager) SendToUserExceptDevice(userID uint, excludeDeviceID string, me
 			}
 		}
 	}
-}
-
-// notifyDeviceStatus 通知设备状态变化
-func (m *Manager) notifyDeviceStatus(userID uint, deviceID string, online bool) {
-	messageType := MessageTypeDeviceOnline
-	if !online {
-		messageType = MessageTypeDeviceOffline
-	}
-
-	message := Message{
-		Type: messageType,
-		Data: gin.H{
-			"device_id": deviceID,
-			"online":    online,
-		},
-		Timestamp: time.Now().Unix(),
-	}
-
-	// 通知用户的其他设备
-	m.SendToUserExceptDevice(userID, deviceID, message)
 }
 
 // GetOnlineDevices 获取用户的在线设备列表
@@ -303,9 +279,14 @@ func (c *Client) writePump() {
 	for {
 		select {
 		case message, ok := <-c.Send:
-			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				log.Printf("Error setting write deadline for client %s: %v", c.ID, err)
+				return
+			}
 			if !ok {
-				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				if err := c.Conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
+					log.Printf("Error writing close message to client %s: %v", c.ID, err)
+				}
 				return
 			}
 
@@ -315,7 +296,10 @@ func (c *Client) writePump() {
 			}
 
 		case <-ticker.C:
-			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				log.Printf("Error setting write deadline for client %s: %v", c.ID, err)
+				return
+			}
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				log.Printf("Error sending ping to client %s: %v", c.ID, err)
 				return
@@ -331,9 +315,14 @@ func (c *Client) readPump() {
 	}()
 
 	c.Conn.SetReadLimit(512)
-	c.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	if err := c.Conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+		log.Printf("Error setting read deadline for client %s: %v", c.ID, err)
+		return
+	}
 	c.Conn.SetPongHandler(func(string) error {
-		c.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		if err := c.Conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+			return err
+		}
 		c.LastSeen = time.Now()
 		return nil
 	})

@@ -84,9 +84,9 @@ func CORSWithConfig(config *CORSConfig) gin.HandlerFunc {
 		// 检查是否允许该源
 		allowedOrigin := "*"
 		if len(config.AllowOrigins) > 0 && config.AllowOrigins[0] != "*" {
-			for _, allowedOrigin := range config.AllowOrigins {
-				if origin == allowedOrigin {
-					allowedOrigin = origin
+			for _, candidateOrigin := range config.AllowOrigins {
+				if origin == candidateOrigin {
+					allowedOrigin = candidateOrigin
 					break
 				}
 			}

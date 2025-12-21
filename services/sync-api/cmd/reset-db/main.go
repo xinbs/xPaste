@@ -65,7 +65,10 @@ func resetDatabase(force bool) {
 		fmt.Print("确认要继续吗？(输入 'yes' 确认): ")
 
 		var confirmation string
-		fmt.Scanln(&confirmation)
+		if _, err := fmt.Scanln(&confirmation); err != nil {
+			fmt.Printf("读取确认输入失败: %v\n", err)
+			os.Exit(1)
+		}
 
 		if confirmation != "yes" {
 			fmt.Println("操作已取消")

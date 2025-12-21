@@ -483,7 +483,7 @@ func (h *ClipHandler) SyncClips(c *gin.Context) {
 	}
 
 	// 同步剪贴板项
-	syncResult, err := h.clipService.SyncClipItems(userID.(uint), deviceID, lastSync)
+	syncResult, err := h.clipService.SyncClipItems(userID.(uint), deviceID, lastSync, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseWithMessage("Failed to sync clip items", err.Error()))
 		return

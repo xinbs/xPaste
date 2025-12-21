@@ -248,13 +248,16 @@ func (s *ClipService) GetClipItemsByDevice(userID uint, deviceID string, params 
 }
 
 // SyncClipItems 同步剪贴板项
-func (s *ClipService) SyncClipItems(userID uint, deviceID string, lastSyncTime *time.Time) (*SyncResult, error) {
+func (s *ClipService) SyncClipItems(userID uint, deviceID string, lastSyncTime *time.Time, limit int) (*SyncResult, error) {
 	var result SyncResult
 
 	// 获取需要同步的剪贴板项（在lastSyncTime之后更新的）
 	query := s.db.Where("user_id = ?", userID)
 	if lastSyncTime != nil {
 		query = query.Where("updated_at > ?", *lastSyncTime)
+	}
+	if limit > 0 {
+		query = query.Limit(limit)
 	}
 
 	var clipItems []*models.ClipItem

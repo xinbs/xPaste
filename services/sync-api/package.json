@@ -6,7 +6,7 @@
     "dev": "go run cmd/server/main.go",
     "build": "go build -o bin/sync-api cmd/server/main.go",
     "test": "go test ./...",
-    "lint": "golangci-lint run"
+    "lint": "go run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5 run"
   },
   "description": "xPaste sync service - Go backend for cross-device synchronization"
 }

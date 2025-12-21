@@ -1,7 +1,6 @@
 package database
 
 import (
-
 	"fmt"
 	"log"
 	"os"
@@ -98,95 +97,6 @@ func Initialize(cfg *config.Config) error {
 func Migrate() error {
 	log.Println("Warning: Migrate() is deprecated, using MigrateDatabase() instead")
 	return MigrateDatabase()
-}
-
-// createIndexes 创建数据库索引
-func createIndexes() error {
-	// 用户表索引
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)").Error; err != nil {
-		return err
-	}
-
-	// 设备表索引
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_devices_user_id ON devices(user_id)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_devices_device_id ON devices(device_id)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_devices_platform ON devices(platform)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_devices_is_online ON devices(is_online)").Error; err != nil {
-		return err
-	}
-
-	// 剪贴板项表索引
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_clip_items_user_id ON clip_items(user_id)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_clip_items_device_id ON clip_items(device_id)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_clip_items_type ON clip_items(type)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_clip_items_status ON clip_items(status)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_clip_items_created_at ON clip_items(created_at)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_clip_items_updated_at ON clip_items(updated_at)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_clip_items_used_at ON clip_items(used_at)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_clip_items_expires_at ON clip_items(expires_at)").Error; err != nil {
-		return err
-	}
-
-	// OCR 结果表索引
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_ocr_results_clip_item_id ON ocr_results(clip_item_id)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_ocr_results_language ON ocr_results(language)").Error; err != nil {
-		return err
-	}
-
-	// 设置表索引
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_settings_user_id ON settings(user_id)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_settings_category ON settings(category)").Error; err != nil {
-		return err
-	}
-
-	// 复合索引
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_clip_items_user_status ON clip_items(user_id, status)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_clip_items_user_type ON clip_items(user_id, type)").Error; err != nil {
-		return err
-	}
-	if err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_settings_user_key ON settings(user_id, key)").Error; err != nil {
-		return err
-	}
-
-	return nil
 }
 
 // SeedData 初始化种子数据

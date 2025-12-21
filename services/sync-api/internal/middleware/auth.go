@@ -108,23 +108,10 @@ func AuthMiddleware(db *gorm.DB) gin.HandlerFunc {
 			c.Set("device_id", claims.DeviceID)
 		}
 
-		// 检查设备状态（如果 Token 中包含 DeviceID）
-		if claims.DeviceID != "" {
-			// 将设备ID存储到上下文，无论是否验证成功（这里只是做个标记，或者可以先移除这段）
-			// c.Set("device_id", claims.DeviceID)
-			// 上面的代码已经移除了原始的设置逻辑，改为在验证通过后设置
-		} else {
-			// 兼容旧 Token 或无设备 ID 的情况（视业务需求而定，建议严格要求）
-			// 如果不强制要求，可以什么都不做
-		}
-
 		// 将用户信息存储到上下文中
 		c.Set("user_id", claims.UserID)
 		c.Set("username", claims.Username)
 		c.Set("user", &user)
-		// if claims.DeviceID != "" { // 这部分逻辑已经移动到上面验证通过后了
-		// 	c.Set("device_id", claims.DeviceID)
-		// }
 
 		c.Next()
 	}
