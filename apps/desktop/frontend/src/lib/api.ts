@@ -7,6 +7,10 @@ type Pagination = {
   total_pages?: number;
 };
 
+type RequestExtra = {
+  allowStatuses?: number[];
+};
+
 class ApiClient {
   private token: string | null = null;
   private refreshTokenValue: string | null = null;
@@ -14,6 +18,9 @@ class ApiClient {
   private onTokenRefresh: ((newToken: string, newRefreshToken: string) => void) | null = null;
   private isRefreshing: boolean = false;
   private failedRequestsQueue: Array<{
+    endpoint: string;
+    options: RequestInit;
+    extra?: RequestExtra;
     resolve: (value: unknown) => void;
     reject: (reason?: unknown) => void;
   }> = [];
@@ -125,20 +132,27 @@ class ApiClient {
 
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    extra?: RequestExtra
   ): Promise<T> {
     const url = `${this.getBaseURL()}${endpoint}`;
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    };
+    const headersObj: Record<string, string> = {};
+    if (options.headers) {
+      const hs = new Headers(options.headers);
+      hs.forEach((v, k) => { headersObj[k] = v; });
+    }
+
+    const hasContentType = Object.keys(headersObj).some(k => k.toLowerCase() === 'content-type');
+    if (!hasContentType && !(options.body instanceof FormData)) {
+      headersObj['Content-Type'] = 'application/json';
+    }
 
     if (this.token) {
-      (headers as Record<string, string>).Authorization = `Bearer ${this.token}`;
+      headersObj.Authorization = `Bearer ${this.token}`;
     }
 
     const { signal, ...restOptions } = options;
-    const fetchOptions: RequestInit = { ...restOptions, headers };
+    const fetchOptions: RequestInit = { ...restOptions, headers: headersObj };
 
     let timeoutId: NodeJS.Timeout | null = null;
 
@@ -158,6 +172,9 @@ class ApiClient {
       }
 
       if (!response.ok) {
+        if (extra?.allowStatuses && extra.allowStatuses.includes(response.status)) {
+          return response.json();
+        }
         if (response.status === 401) {
           // 如果是登录接口本身，直接抛出错误
           if (endpoint.includes('/auth/login')) {
@@ -195,15 +212,15 @@ class ApiClient {
                     }
                     
                     // 处理队列中的请求
-                    this.failedRequestsQueue.forEach(({ resolve, reject }) => {
+                    this.failedRequestsQueue.forEach(({ endpoint, options, extra, resolve, reject }) => {
                       // 重新发起请求
-                      this.request(endpoint, options).then(resolve).catch(reject);
+                      this.request(endpoint, options, extra).then(resolve).catch(reject);
                     });
                     this.failedRequestsQueue = [];
                     
                     // 重试当前请求
                     this.isRefreshing = false;
-                    return this.request<T>(endpoint, options);
+                    return this.request<T>(endpoint, options, extra);
                   }
                 }
                 
@@ -212,12 +229,15 @@ class ApiClient {
               } else {
                 // 正在刷新中，将请求加入队列
                 return new Promise<T>((resolve, reject) => {
-                  this.failedRequestsQueue.push({ resolve, reject });
+                  this.failedRequestsQueue.push({ endpoint, options, extra, resolve, reject });
                 });
               }
             } catch {
               // 刷新失败，清除状态并登出
               this.isRefreshing = false;
+              this.failedRequestsQueue.forEach(({ reject }) => {
+                reject(new Error('Token refresh failed'));
+              });
               this.failedRequestsQueue = [];
               this.clearToken();
               if (this.onUnauthorized) {
@@ -556,6 +576,149 @@ class ApiClient {
       message: string;
       data: unknown;
     }>('/notes/ack', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async getCloudFilesTree(opts: { path?: string; recursive?: boolean; useData?: boolean } = {}) {
+    const params = new URLSearchParams();
+    if (opts.path) params.set('path', opts.path);
+    if (opts.recursive) params.set('recursive', '1');
+    if (opts.useData) params.set('use_data', 'true');
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: {
+        path: string;
+        recursive: boolean;
+        items: { name: string; path: string; is_dir: boolean; size_bytes?: number; mtime_ms?: number }[];
+      };
+    }>(`/cloud-files/tree${qs}`, { method: 'GET' });
+  }
+
+  async getCloudFileMeta(opts: { path: string; useData?: boolean }) {
+    const params = new URLSearchParams();
+    params.set('path', opts.path);
+    if (opts.useData) params.set('use_data', 'true');
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: { path: string; is_dir: boolean; size_bytes?: number; mtime_ms?: number; sha256?: string; backup_path?: string };
+    }>(`/cloud-files/meta${qs}`, { method: 'GET' });
+  }
+
+  async downloadCloudFile(opts: { path: string; useData?: boolean }) {
+    const params = new URLSearchParams();
+    params.set('path', opts.path);
+    if (opts.useData) params.set('use_data', 'true');
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const url = `${this.getBaseURL()}/cloud-files/file${qs}`;
+    const headers: HeadersInit = {};
+    if (this.token) {
+      (headers as Record<string, string>).Authorization = `Bearer ${this.token}`;
+    }
+    const response = await fetch(url, { method: 'GET', headers });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+    }
+    const data = await response.arrayBuffer();
+    const path = response.headers.get('X-File-Path') || opts.path;
+    const sizeBytes = Number(response.headers.get('X-File-Size') || 0) || 0;
+    const mtimeMs = Number(response.headers.get('X-File-Mtime-Ms') || 0) || 0;
+    return { path, sizeBytes, mtimeMs, data };
+  }
+
+  async writeCloudText(payload: { path: string; content: string; ifMatchHash?: string; mode?: string; useData?: boolean }) {
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: unknown;
+    }>('/cloud-files/text', { method: 'PUT', body: JSON.stringify({
+      path: payload.path,
+      content: payload.content,
+      if_match_hash: payload.ifMatchHash,
+      mode: payload.mode,
+      use_data: !!payload.useData,
+    }) }, { allowStatuses: [409] });
+  }
+
+  async uploadCloudFile(fileData: Blob | File, opts: { path: string; mode?: string; ifMatchHash?: string; useData?: boolean }) {
+    const params = new URLSearchParams();
+    params.set('path', opts.path);
+    if (opts.mode) params.set('mode', opts.mode);
+    if (opts.ifMatchHash) params.set('if_match_hash', opts.ifMatchHash);
+    if (opts.useData) params.set('use_data', 'true');
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const formData = new FormData();
+    const name = fileData instanceof File ? fileData.name : 'file';
+    formData.append('file', fileData, name);
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: unknown;
+    }>(`/cloud-files/upload${qs}`, { method: 'POST', body: formData }, { allowStatuses: [409] });
+  }
+
+  async renameCloudFile(payload: { fromPath: string; toPath: string; mode?: string; useData?: boolean }) {
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: unknown;
+    }>('/cloud-files/rename', { method: 'PATCH', body: JSON.stringify({
+      from_path: payload.fromPath,
+      to_path: payload.toPath,
+      mode: payload.mode,
+      use_data: !!payload.useData,
+    }) }, { allowStatuses: [409] });
+  }
+
+  async deleteCloudFile(opts: { path: string; trash?: boolean; useData?: boolean }) {
+    const params = new URLSearchParams();
+    params.set('path', opts.path);
+    params.set('trash', opts.trash === false ? '0' : '1');
+    if (opts.useData) params.set('use_data', 'true');
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: unknown;
+    }>(`/cloud-files/file${qs}`, { method: 'DELETE' });
+  }
+
+  async listCloudTrash(opts: { useData?: boolean } = {}) {
+    const params = new URLSearchParams();
+    if (opts.useData) params.set('use_data', 'true');
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: { items: { trash_id: string; original_path: string; deleted_at_ms: number; is_dir: boolean; size_bytes?: number; mtime_ms?: number }[] };
+    }>(`/cloud-files/trash${qs}`, { method: 'GET' });
+  }
+
+  async restoreCloudTrash(payload: { trashId: string; mode?: string; useData?: boolean }) {
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: unknown;
+    }>('/cloud-files/trash/restore', { method: 'POST', body: JSON.stringify({
+      trash_id: payload.trashId,
+      mode: payload.mode,
+      use_data: !!payload.useData,
+    }) }, { allowStatuses: [409] });
+  }
+
+  async deleteCloudTrashItem(opts: { trashId: string; useData?: boolean }) {
+    const params = new URLSearchParams();
+    params.set('trash_id', opts.trashId);
+    if (opts.useData) params.set('use_data', 'true');
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: unknown;
+    }>(`/cloud-files/trash/item${qs}`, { method: 'DELETE' });
   }
 
   // 健康检查

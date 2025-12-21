@@ -9,24 +9,26 @@ import (
 
 // Handlers 处理器集合
 type Handlers struct {
-  AuthHandler    *AuthHandler
-  DeviceHandler  *DeviceHandler
-  ClipHandler    *ClipHandler
-  SettingHandler *SettingHandler
-  UploadHandler  *UploadHandler
-  NotesHandler   *NotesHandler
+	AuthHandler       *AuthHandler
+	DeviceHandler     *DeviceHandler
+	ClipHandler       *ClipHandler
+	SettingHandler    *SettingHandler
+	UploadHandler     *UploadHandler
+	NotesHandler      *NotesHandler
+	CloudFilesHandler *CloudFilesHandler
 }
 
 // NewHandlers 创建处理器集合
 func NewHandlers(services *services.Services) *Handlers {
-  return &Handlers{
-    AuthHandler:    NewAuthHandler(services.User, services.Device, services.GetDB()),
-    DeviceHandler:  NewDeviceHandler(services.Device, services.GetDB()),
-    ClipHandler:    NewClipHandler(services.Clip, services.GetDB()),
-    SettingHandler: NewSettingHandler(services.Setting),
-    UploadHandler:  NewUploadHandler(services.GetDB()),
-    NotesHandler:   NewNotesHandler(services.GetDB()),
-  }
+	return &Handlers{
+		AuthHandler:       NewAuthHandler(services.User, services.Device, services.GetDB()),
+		DeviceHandler:     NewDeviceHandler(services.Device, services.GetDB()),
+		ClipHandler:       NewClipHandler(services.Clip, services.GetDB()),
+		SettingHandler:    NewSettingHandler(services.Setting),
+		UploadHandler:     NewUploadHandler(services.GetDB()),
+		NotesHandler:      NewNotesHandler(services.GetDB()),
+		CloudFilesHandler: NewCloudFilesHandler(services.GetDB()),
+	}
 }
 
 // RegisterRoutes 注册所有路由
@@ -50,17 +52,18 @@ func (h *Handlers) RegisterRoutes(router *gin.Engine) {
 		h.AuthHandler.RegisterRoutes(api)
 
 		// 需要认证的路由组
-    authenticated := api.Group("")
-    authenticated.Use(middleware.AuthMiddleware(h.AuthHandler.db))
-    {
-      // 注册需要认证的模块路由
-      h.DeviceHandler.RegisterRoutes(authenticated)
-      h.ClipHandler.RegisterRoutes(authenticated)
-      h.SettingHandler.RegisterRoutes(authenticated)
-      h.UploadHandler.RegisterRoutes(authenticated)
-      h.NotesHandler.RegisterRoutes(authenticated)
-    }
-  }
+		authenticated := api.Group("")
+		authenticated.Use(middleware.AuthMiddleware(h.AuthHandler.db))
+		{
+			// 注册需要认证的模块路由
+			h.DeviceHandler.RegisterRoutes(authenticated)
+			h.ClipHandler.RegisterRoutes(authenticated)
+			h.SettingHandler.RegisterRoutes(authenticated)
+			h.UploadHandler.RegisterRoutes(authenticated)
+			h.NotesHandler.RegisterRoutes(authenticated)
+			h.CloudFilesHandler.RegisterRoutes(authenticated)
+		}
+	}
 
 	// 根路径重定向到健康检查
 	router.GET("/", func(c *gin.Context) {
