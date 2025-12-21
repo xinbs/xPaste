@@ -14,14 +14,23 @@ type TreeNode = {
   children?: TreeNode[]
 }
 
+type ListEntry = {
+  path: string
+  size?: number
+  mtime?: string
+  mtime_ms?: number
+}
+
   const NotebookManagement: React.FC = () => {
   const [notes, setNotes] = useState<string[]>([])
+  const [noteMeta, setNoteMeta] = useState<Record<string, ListEntry>>({})
   const [loadingList, setLoadingList] = useState(false)
   const [selectedFile, setSelectedFile] = useState('')
   const [content, setContent] = useState('')
   const [loadingNote, setLoadingNote] = useState(false)
   const [savingNote, setSavingNote] = useState(false)
   const [attachments, setAttachments] = useState<string[]>([])
+  const [attachmentMeta, setAttachmentMeta] = useState<Record<string, ListEntry>>({})
   const [loadingAttach, setLoadingAttach] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadName, setUploadName] = useState('')
@@ -49,7 +58,7 @@ type TreeNode = {
       setDraggingSidebar(false)
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
-      try { localStorage.setItem('notebook_sidebar_w', String(lastW)) } catch {}
+      try { localStorage.setItem('notebook_sidebar_w', String(lastW)) } catch { void 0 }
     }
     setDraggingSidebar(true)
     window.addEventListener('mousemove', onMove)
@@ -67,10 +76,21 @@ type TreeNode = {
     try {
       const res = await api.get(`/api/v1/notebooks${qs}`)
       const items = (res.data?.data?.items || []) as string[]
+      const rawEntries = res.data?.data?.entries
+      const meta: Record<string, ListEntry> = {}
+      if (Array.isArray(rawEntries)) {
+        for (const it of rawEntries) {
+          if (it && typeof it.path === 'string' && it.path.trim()) {
+            meta[it.path] = it as ListEntry
+          }
+        }
+      }
       setNotes(items)
+      setNoteMeta(meta)
     } catch (e) {
       console.error(e)
       setNotes([])
+      setNoteMeta({})
     } finally {
       setLoadingList(false)
     }
@@ -125,9 +145,20 @@ type TreeNode = {
     try {
       const res = await api.get(`/api/v1/notebooks/attachments${qs}`)
       setAttachments((res.data?.data?.items || []) as string[])
+      const rawEntries = res.data?.data?.entries
+      const meta: Record<string, ListEntry> = {}
+      if (Array.isArray(rawEntries)) {
+        for (const it of rawEntries) {
+          if (it && typeof it.path === 'string' && it.path.trim()) {
+            meta[it.path] = it as ListEntry
+          }
+        }
+      }
+      setAttachmentMeta(meta)
     } catch (e) {
       console.error(e)
       setAttachments([])
+      setAttachmentMeta({})
     } finally {
       setLoadingAttach(false)
     }
@@ -180,7 +211,6 @@ type TreeNode = {
     // 自动加载列表
     loadNotes()
     loadAttachments()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const makeAttachmentUrl = (name: string) => {
@@ -237,6 +267,24 @@ type TreeNode = {
     const isImage = ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'].includes(ext)
     const md = isImage ? `\n![](${name})\n` : `\n[${name}](${name})\n`
     setContent((v) => (v || '') + md)
+  }
+
+  const formatBytes = (n?: number) => {
+    const v = typeof n === 'number' && Number.isFinite(n) ? n : 0
+    if (v < 1024) return `${v} B`
+    const kb = v / 1024
+    if (kb < 1024) return `${kb.toFixed(1)} KB`
+    const mb = kb / 1024
+    if (mb < 1024) return `${mb.toFixed(1)} MB`
+    const gb = mb / 1024
+    return `${gb.toFixed(1)} GB`
+  }
+
+  const formatTime = (entry?: ListEntry) => {
+    if (!entry) return ''
+    const ms = typeof entry.mtime_ms === 'number' && Number.isFinite(entry.mtime_ms) ? entry.mtime_ms : (typeof entry.mtime === 'string' ? Date.parse(entry.mtime) : NaN)
+    if (!Number.isFinite(ms)) return ''
+    return new Date(ms).toLocaleString()
   }
 
   // 移除自动修复逻辑
@@ -323,6 +371,8 @@ type TreeNode = {
     }
     const key = `${node.type}:${node.path}`
     const active = (selectedKind === 'note' && selectedFile === node.path) || (selectedKind === 'attachment' && selectedAttachmentPath === node.path)
+    const meta = node.type === 'note' ? noteMeta[node.path] : attachmentMeta[node.path]
+    const metaTime = formatTime(meta)
     return (
       <div key={key} className={`flex items-center justify-between px-2 py-1 rounded cursor-pointer ${active ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50 text-gray-800'}`} style={padding} onClick={() => {
         if (node.type === 'note') {
@@ -334,7 +384,8 @@ type TreeNode = {
         }
       }}>
         <span className="text-xs">{node.type === 'note' ? '📝' : (isImageName(node.name) ? '🖼️' : '📎')} {node.name}</span>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
+          {metaTime ? <span className="text-[10px] text-gray-400">{metaTime}</span> : null}
           {node.type === 'note' ? (
             <button className="text-[10px] px-1.5 py-0.5 bg-red-600 text-white rounded" onClick={(e) => { e.stopPropagation(); deleteNote(node.path) }}>删除</button>
           ) : (
@@ -386,11 +437,21 @@ type TreeNode = {
               {selectedKind === 'note' && (
                 <div className="flex items-center space-x-2">
                   <span className="text-xs text-gray-500">{selectedFile || '未选择文件'}</span>
+                  {selectedFile && noteMeta[selectedFile] ? (
+                    <span className="text-xs text-gray-400">
+                      {formatTime(noteMeta[selectedFile])}{noteMeta[selectedFile]?.size != null ? ` · ${formatBytes(noteMeta[selectedFile]?.size)}` : ''}
+                    </span>
+                  ) : null}
                   {loadingNote && <span className="text-xs text-gray-400">加载中...</span>}
                 </div>
               )}
               {selectedKind === 'attachment' && (
                 <div className="flex items-center space-x-2">
+                  {selectedAttachmentPath && attachmentMeta[selectedAttachmentPath] ? (
+                    <span className="text-xs text-gray-400">
+                      {formatTime(attachmentMeta[selectedAttachmentPath])}{attachmentMeta[selectedAttachmentPath]?.size != null ? ` · ${formatBytes(attachmentMeta[selectedAttachmentPath]?.size)}` : ''}
+                    </span>
+                  ) : null}
                   <a href={downloadUrl(selectedAttachmentPath)} target="_blank" rel="noreferrer" className="text-xs px-2 py-1 bg-gray-100 rounded">下载</a>
                   <button className="text-xs px-2 py-1 bg-gray-100 rounded" onClick={() => insertAttachmentMarkdown(selectedAttachmentPath)}>插入到笔记</button>
                 </div>

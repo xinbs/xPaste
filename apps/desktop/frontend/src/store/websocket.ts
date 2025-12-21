@@ -6,7 +6,7 @@ import { useConfigStore } from './config';
 
 interface WebSocketMessage {
   type: 'clipboard_sync' | 'device_online' | 'device_offline' | 'ping' | 'pong';
-  data?: any;
+  data?: unknown;
   timestamp: string;
   device_id?: string;
 }
@@ -66,6 +66,10 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => {
   const handleMessage = (event: MessageEvent) => {
     try {
       const message: WebSocketMessage = JSON.parse(event.data);
+      const dataObj =
+        message.data && typeof message.data === 'object'
+          ? (message.data as Record<string, unknown>)
+          : null;
       
       switch (message.type) {
         case 'clipboard_sync':
@@ -82,10 +86,10 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => {
         case 'device_online':
           // 处理设备上线
           console.log('Device online:', message.data);
-          if (message.data && message.data.device_id) {
+          if (dataObj && typeof dataObj.device_id === 'string') {
             const { onlineDevices } = get();
-            if (!onlineDevices.includes(message.data.device_id)) {
-              set({ onlineDevices: [...onlineDevices, message.data.device_id] });
+            if (!onlineDevices.includes(dataObj.device_id)) {
+              set({ onlineDevices: [...onlineDevices, dataObj.device_id] });
             }
           }
           break;
@@ -93,9 +97,9 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => {
         case 'device_offline':
           // 处理设备下线
           console.log('Device offline:', message.data);
-          if (message.data && message.data.device_id) {
+          if (dataObj && typeof dataObj.device_id === 'string') {
             const { onlineDevices } = get();
-            set({ onlineDevices: onlineDevices.filter(id => id !== message.data.device_id) });
+            set({ onlineDevices: onlineDevices.filter(id => id !== dataObj.device_id) });
           }
           break;
           

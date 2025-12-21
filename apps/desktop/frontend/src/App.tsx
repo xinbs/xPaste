@@ -10,7 +10,7 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import ToastContainer from '@/components/ToastContainer';
 
 export default function App() {
-  const { isAuthenticated, currentDevice, user, validateToken, fetchDevices, clearStorage, logout } = useAuthStore();
+  const { isAuthenticated, currentDevice, user } = useAuthStore();
   const [isInitialized, setIsInitialized] = useState(false);
   const [currentRoute, setCurrentRoute] = useState(window.location.hash.slice(1) || '/');
   const isFirstRun = useRef(true);
@@ -19,7 +19,7 @@ export default function App() {
     // 设置API客户端的未授权回调
     apiClient.setUnauthorizedHandler(() => {
       console.log('检测到Token失效，自动登出');
-      logout();
+      useAuthStore.getState().logout();
       useToastStore.getState().showWarning('会话已过期', '请重新登录');
     });
 
@@ -33,15 +33,15 @@ export default function App() {
       // 如果是刷新页面，useAuthStore 会从 localStorage 恢复状态，isAuthenticated 可能为 true
       if (useAuthStore.getState().isAuthenticated) {
         console.log('应用启动，验证Token有效性...');
-        const tokenValid = await validateToken();
+        const tokenValid = await useAuthStore.getState().validateToken();
         
         // 如果token有效且有currentDevice，验证设备是否仍然存在
         if (tokenValid && useAuthStore.getState().currentDevice) {
           try {
-            await fetchDevices();
+            await useAuthStore.getState().fetchDevices();
           } catch (error) {
             console.warn('Failed to fetch devices, clearing current device:', error);
-            clearStorage();
+            useAuthStore.getState().clearStorage();
           }
         }
       }

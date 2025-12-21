@@ -2,8 +2,8 @@ export interface ElectronAPI {
   getAppVersion: () => Promise<string>;
   getPlatform: () => Promise<string>;
   isDevelopment: () => Promise<boolean>;
-  showSaveDialog: (options: any) => Promise<any>;
-  showOpenDialog: (options: any) => Promise<any>;
+  showSaveDialog: (options: Record<string, unknown>) => Promise<{ canceled?: boolean; filePath?: string }>;
+  showOpenDialog: (options: Record<string, unknown>) => Promise<{ canceled?: boolean; filePaths?: string[] }>;
   openSettingsWindow: () => Promise<void>;
   showMainWindow: () => Promise<{ success: boolean; error?: string }>;
   quitApp: () => Promise<{ success: boolean; error?: string }>;
@@ -29,11 +29,11 @@ export interface ElectronAPI {
   }>;
   
   // 托盘事件监听
-  on: (channel: string, callback: (...args: any[]) => void) => void;
-  removeListener: (channel: string, callback: (...args: any[]) => void) => void;
+  on: (channel: string, callback: (...args: unknown[]) => void) => void;
+  removeListener: (channel: string, callback: (...args: unknown[]) => void) => void;
   
   // 日志
-  log: (message: string, data?: any) => void;
+  log: (message: string, data?: unknown) => void;
   syncToken: (token: string) => void;
   onRequestToken: (callback: () => void) => void;
 
@@ -61,6 +61,6 @@ export interface ElectronAPI {
 
 declare global {
   interface Window {
-    electronAPI: ElectronAPI;
+    electronAPI?: ElectronAPI;
   }
 }

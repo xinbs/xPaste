@@ -70,12 +70,16 @@ export class ErrorHandler {
     }
 
     if (error && typeof error === 'object') {
-      const errorObj = error as any;
+      const errorObj = error as Record<string, unknown>;
+      const code = typeof errorObj.code === 'string' ? errorObj.code : undefined;
+      const message = typeof errorObj.message === 'string' ? errorObj.message : undefined;
+      const details = typeof errorObj.details === 'string' ? errorObj.details : undefined;
+      const statusCode = typeof errorObj.statusCode === 'number' ? errorObj.statusCode : undefined;
       return {
-        code: errorObj.code,
-        message: errorObj.message || '未知错误',
-        details: errorObj.details,
-        statusCode: errorObj.statusCode,
+        code,
+        message: message || '未知错误',
+        details,
+        statusCode,
       };
     }
 
@@ -156,7 +160,7 @@ export const handleError = (error: unknown, config?: ErrorHandlerConfig): AppErr
 };
 
 // 异步操作错误处理装饰器
-export const withErrorHandling = <T extends (...args: any[]) => Promise<any>>(
+export const withErrorHandling = <T extends (...args: unknown[]) => Promise<unknown>>(
   fn: T,
   config?: ErrorHandlerConfig
 ): T => {

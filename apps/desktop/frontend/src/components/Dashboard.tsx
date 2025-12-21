@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuthStore } from '@/store/auth';
-import { useClipboardStore } from '@/store/clipboard';
+import { useClipboardStore, type ClipItem } from '@/store/clipboard';
 import { useWebSocketStore } from '@/store/websocket';
 import { useConfigStore } from '@/store/config';
-import { Copy, Monitor, LogOut, Plus, Trash2, Upload, Play, Pause, X, RefreshCw, Edit2, Settings as SettingsIcon, Search, Type, Image as ImageIcon, FileText, Save, MoreVertical } from 'lucide-react';
+import { Copy, Monitor, Plus, Trash2, Upload, Play, Pause, RefreshCw, Edit2, Settings as SettingsIcon, Search, Type, Image as ImageIcon, FileText, Save, MoreVertical } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import FileUpload, { FilePreview } from '@/components/FileUpload';
 import WebSocketStatus from '@/components/WebSocketStatus';
@@ -16,18 +16,31 @@ import apiClient from '@/lib/api';
 
 import NotebookTab from '@/components/NotebookTab';
 
+const TAB_KEYS = ['clipboard', 'quickadd', 'devices', 'notebook', 'settings'] as const;
+type TabKey = (typeof TAB_KEYS)[number];
+
+const TYPE_FILTERS = ['all', 'text', 'image', 'file'] as const;
+type TypeFilter = (typeof TYPE_FILTERS)[number];
+
+const isTabKey = (value: string): value is TabKey => {
+  return (TAB_KEYS as readonly string[]).includes(value);
+};
+
+const isTypeFilter = (value: string): value is TypeFilter => {
+  return (TYPE_FILTERS as readonly string[]).includes(value);
+};
+
 export default function Dashboard() {
   console.log('Dashboard: 组件开始渲染...');
-  const [activeTab, setActiveTab] = useState<'clipboard' | 'quickadd' | 'devices' | 'notebook' | 'settings'>('clipboard');
+  const [activeTab, setActiveTab] = useState<TabKey>('clipboard');
   const [newClipText, setNewClipText] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [showFileUpload, setShowFileUpload] = useState(false);
   const [editingDevice, setEditingDevice] = useState<string | null>(null);
   const [newDeviceName, setNewDeviceName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'text' | 'image' | 'file'>('all');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
 
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<ClipItem[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchPage, setSearchPage] = useState(1);
   const [searchHasMore, setSearchHasMore] = useState(false);
@@ -36,10 +49,8 @@ export default function Dashboard() {
   const { user, devices, currentDevice, logout, fetchDevices, renameDevice, deleteDevice, isAuthenticated, registerDevice, token } = useAuthStore();
   const { 
     items: clipItems, 
-    fetchItems: fetchClipItems, 
     deleteItem: deleteClipItem,
     addItem,
-    uploadFile,
     copyToClipboard,
     isLoading: clipboardLoading,
     error: clipError,
@@ -51,7 +62,7 @@ export default function Dashboard() {
     isLoadingMore,
     loadMoreItems 
   } = useClipboardStore();
-  const { isConnected, connect, disconnect, onlineDevices } = useWebSocketStore();
+  const { onlineDevices } = useWebSocketStore();
 
   const clipboardScrollRef = useRef<HTMLDivElement | null>(null);
   const clipboardSentinelRef = useRef<HTMLDivElement | null>(null);
@@ -140,15 +151,18 @@ export default function Dashboard() {
         syncServerConfigToMain();
       });
     }
-  }, [serverConfig.baseUrl]);
+  }, [getApiUrl, serverConfig.baseUrl]);
 
   useEffect(() => {
     try {
-      const action = useSettingsStore.getState().getSetting(SETTING_KEYS.USER_CLOSE_BEHAVIOR, 'minimize');
-      if (window.electronAPI && (window.electronAPI as any).syncCloseBehavior) {
-        (window.electronAPI as any).syncCloseBehavior({ close_action: action });
+      const actionRaw = useSettingsStore.getState().getSetting(SETTING_KEYS.USER_CLOSE_BEHAVIOR, 'minimize');
+      const action = actionRaw === 'minimize' || actionRaw === 'hide' || actionRaw === 'quit' ? actionRaw : 'minimize';
+      if (window.electronAPI && typeof window.electronAPI.syncCloseBehavior === 'function') {
+        window.electronAPI.syncCloseBehavior({ close_action: action });
       }
-    } catch {}
+    } catch {
+      void 0;
+    }
   }, []);
 
   const performSearch = useCallback(
@@ -172,7 +186,7 @@ export default function Dashboard() {
       }
 
       try {
-        const response = await apiClient.searchClipItems(
+        const response = await apiClient.searchClipItems<ClipItem>(
           { q: trimmed, page, limit: 20 },
           controller.signal
         );
@@ -272,22 +286,26 @@ export default function Dashboard() {
     const devicesController = new AbortController();
 
     // 监听来自托盘的 IPC 事件
-    let handleToggleMonitoring: ((event: any, enabled: boolean) => void) | null = null;
-    let handleSwitchTab: ((event: any, tab: string) => void) | null = null;
+    let handleToggleMonitoring: ((event: unknown, enabled: boolean) => void) | null = null;
+    let handleSwitchTab: ((event: unknown, tab: string) => void) | null = null;
     
     if (window.electronAPI) {
       // 监听托盘的剪贴板监控切换
-      handleToggleMonitoring = (event: any, enabled: boolean) => {
+      handleToggleMonitoring = (event: unknown, enabled: boolean) => {
+        void event;
         if (enabled) {
-          startMonitoring();
+          useClipboardStore.getState().startMonitoring();
         } else {
-          stopMonitoring();
+          useClipboardStore.getState().stopMonitoring();
         }
       };
 
       // 监听托盘的标签页切换
-      handleSwitchTab = (event: any, tab: string) => {
-        setActiveTab(tab as any);
+      handleSwitchTab = (event: unknown, tab: string) => {
+        void event;
+        if (isTabKey(tab)) {
+          setActiveTab(tab);
+        }
       };
 
       // 添加事件监听器（如果 electronAPI 支持）
@@ -311,7 +329,7 @@ export default function Dashboard() {
       if (isMounted && !clipItemsController.signal.aborted) {
         console.log('Dashboard: Starting to fetch clip items...');
         promises.push(
-          fetchClipItems(clipItemsController.signal).then(() => {
+          useClipboardStore.getState().fetchItems(clipItemsController.signal).then(() => {
             console.log('Dashboard: Clip items fetched successfully');
           }).catch(error => {
             if (error instanceof Error && error.name !== 'AbortError') {
@@ -323,7 +341,7 @@ export default function Dashboard() {
       
       if (isMounted && !devicesController.signal.aborted) {
         promises.push(
-          fetchDevices(devicesController.signal).catch(error => {
+          useAuthStore.getState().fetchDevices(devicesController.signal).catch(error => {
             if (error instanceof Error && error.name !== 'AbortError') {
               console.error('Failed to fetch devices:', error);
             }
@@ -339,10 +357,11 @@ export default function Dashboard() {
     console.log('Dashboard: loadData 调用完成');
     
     // 默认启动剪贴板监听
-    console.log('Dashboard: 检查剪贴板监听状态 - isMonitoring:', isMonitoring);
-    if (!isMonitoring) {
+    const monitoring = useClipboardStore.getState().isMonitoring;
+    console.log('Dashboard: 检查剪贴板监听状态 - isMonitoring:', monitoring);
+    if (!monitoring) {
       console.log('Dashboard: 启动剪贴板监听...');
-      startMonitoring();
+      useClipboardStore.getState().startMonitoring();
     } else {
       console.log('Dashboard: 剪贴板监听已启动');
     }
@@ -451,7 +470,6 @@ export default function Dashboard() {
     
     if (success) {
       setSelectedFile(null);
-      setShowFileUpload(false);
     }
   };
 
@@ -514,7 +532,12 @@ export default function Dashboard() {
             </div>
             <select
               value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value as any)}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (isTypeFilter(next)) {
+                  setTypeFilter(next);
+                }
+              }}
               className="px-2 py-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="all">全部</option>
@@ -561,7 +584,10 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="space-y-1">
-                {filteredClipItems.map((item) => (
+                {filteredClipItems.map((item) => {
+                  const metadata = item.metadata && typeof item.metadata === 'object' ? (item.metadata as Record<string, unknown>) : null
+                  const imageSize = metadata && typeof metadata.size === 'number' ? metadata.size : null
+                  return (
                   <div key={item.id} className="bg-white rounded border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all duration-200 group">
                     <div className="p-2">
                       <div className="flex items-start justify-between">
@@ -599,9 +625,9 @@ export default function Dashboard() {
                           
                           {item.type === 'image' && (
                             <div className="space-y-1">
-                              {item.metadata?.size && (
+                              {imageSize && (
                                 <span className="text-xs text-gray-500">
-                                  ({Math.round(item.metadata.size / 1024)}KB)
+                                  ({Math.round(imageSize / 1024)}KB)
                                 </span>
                               )}
                               {item.content && (
@@ -695,7 +721,8 @@ export default function Dashboard() {
                       </div>
                     </div>
                   </div>
-                ))}
+                  )
+                })}
             </div>
           )}
 
@@ -795,7 +822,7 @@ export default function Dashboard() {
       }
     };
 
-    const startEditDevice = (device: any) => {
+    const startEditDevice = (device: { device_id: string; name: string }) => {
       setEditingDevice(device.device_id);
       setNewDeviceName(device.name);
     };
@@ -980,8 +1007,8 @@ export default function Dashboard() {
                             </div>
                             <div className="flex flex-wrap gap-1">
                               {Object.entries(device.capabilities)
-                                .filter(([_, enabled]) => enabled)
-                                .map(([cap, _]) => (
+                                .filter(([, enabled]) => enabled)
+                                .map(([cap]) => (
                                 <span
                                   key={cap}
                                   className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700"
@@ -1122,16 +1149,16 @@ export default function Dashboard() {
           {/* 左侧：标签导航 + 监控状态 - 禁用拖动以便交互 */}
           <div className="flex items-center space-x-3 flex-1 min-w-0 app-region-no-drag">
             <nav className="flex space-x-1 overflow-x-auto scrollbar-hide">
-              {[
+              {([
                 { key: 'clipboard', label: '历史', icon: Copy, shortLabel: '历史' },
                 { key: 'quickadd', label: '添加', icon: Plus, shortLabel: '添加' },
                 { key: 'devices', label: '设备', icon: Monitor, shortLabel: '设备' },
                 { key: 'notebook', label: '记事本', icon: FileText, shortLabel: '记事本' },
                 { key: 'settings', label: '设置', icon: SettingsIcon, shortLabel: '设置' },
-              ].map(({ key, label, icon: Icon, shortLabel }) => (
+              ] as const).map(({ key, label, icon: Icon, shortLabel }) => (
                 <button
                   key={key}
-                  onClick={() => setActiveTab(key as any)}
+                  onClick={() => setActiveTab(key)}
                   className={cn(
                     "flex items-center space-x-1 py-1.5 px-2 rounded-md font-medium text-xs transition-all duration-200 whitespace-nowrap flex-shrink-0",
                     activeTab === key
@@ -1205,14 +1232,16 @@ export default function Dashboard() {
                     onClick={async () => {
                       setShowAppMenu(false);
                       try {
-                        if (window.electronAPI && (window.electronAPI as any).quitApp) {
-                          await (window.electronAPI as any).quitApp();
+                        if (window.electronAPI && typeof window.electronAPI.quitApp === 'function') {
+                          await window.electronAPI.quitApp();
                         } else if (window.electronAPI && window.electronAPI.closeWindow) {
                           await window.electronAPI.closeWindow();
                         } else {
                           window.close();
                         }
-                      } catch {}
+                      } catch {
+                        void 0;
+                      }
                     }}
                     className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100"
                   >
@@ -1245,13 +1274,17 @@ export default function Dashboard() {
     </div>
   );
 }
-  const handleSaveToNotebook = async (item: any) => {
+  const handleSaveToNotebook = async (item: Pick<ClipItem, 'type' | 'content' | 'file_path' | 'metadata'>) => {
     try {
+      const metadata =
+        item.metadata && typeof item.metadata === 'object'
+          ? (item.metadata as Record<string, unknown>)
+          : undefined
       const ok = await useNoteFilesStore.getState().saveClipboardItemToDefaultMd({
         type: item.type,
         content: item.content,
         file_path: item.file_path,
-        metadata: item.metadata,
+        metadata,
       })
       if (ok) {
         useToastStore.getState().showSuccess('已保存到记事本', '内容已追加到默认Markdown文件')

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, RotateCcw, Download, Upload, AlertCircle, CheckCircle, X, Server, Wifi, LogIn, Keyboard } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Download, Upload, AlertCircle, CheckCircle, X, Server, Wifi, LogIn, Keyboard } from 'lucide-react';
 import { useSettingsStore, SETTING_KEYS, SETTING_GROUPS } from '../store/settings';
 import { useNoteFilesStore } from '../store/noteFiles';
 import { useAuthStore } from '../store/auth';
@@ -142,7 +142,7 @@ const NumberInput: React.FC<NumberInputProps> = ({
 
 // 主设置组件
 export const Settings: React.FC = () => {
-  const { isAuthenticated, user, validateToken } = useAuthStore();
+  const { isAuthenticated, user } = useAuthStore();
   const {
     settings,
     isLoading,
@@ -150,18 +150,13 @@ export const Settings: React.FC = () => {
     fetchSettings,
     getSetting,
     setSetting,
-    resetSetting,
     exportSettings,
     importSettings,
     clearError,
     getTheme,
-    setTheme,
     getLanguage,
-    setLanguage,
     getAutoSync,
-    setAutoSync,
     getSyncInterval,
-    setSyncInterval,
   } = useSettingsStore();
   
   const { serverConfig, setServerConfig } = useConfigStore();
@@ -174,15 +169,19 @@ export const Settings: React.FC = () => {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const defaultHotkey = 'CmdOrCtrl+Shift+V';
   // 兼容后端将 JSON 以字符串返回的情况
-  const safeParseJson = (val: any, fallback: any) => {
+  const safeParseJson = <T,>(val: unknown, fallback: T): T => {
     if (typeof val === 'string') {
       const trimmed = val.trim();
       if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-        try { return JSON.parse(trimmed); } catch { return fallback; }
+        try {
+          return JSON.parse(trimmed) as T;
+        } catch {
+          return fallback;
+        }
       }
       return fallback;
     }
-    return val ?? fallback;
+    return (val ?? fallback) as T;
   };
 
   // 解析形如 Go 的 map 字符串: map[key:value key2:value2]
@@ -203,7 +202,7 @@ export const Settings: React.FC = () => {
     return result;
   };
 
-  const isValidHotkey = (val: any): val is string => {
+  const isValidHotkey = (val: unknown): val is string => {
     return (
       typeof val === 'string' &&
       !val.startsWith('map[') &&
@@ -212,10 +211,15 @@ export const Settings: React.FC = () => {
     );
   };
 
+  const normalizeCloseAction = (val: unknown): 'minimize' | 'hide' | 'quit' => {
+    if (val === 'minimize' || val === 'hide' || val === 'quit') return val;
+    return 'minimize';
+  };
+
   const initialHotkeysRaw = typeof getSetting === 'function' ? getSetting(SETTING_KEYS.USER_HOTKEYS, {}) : undefined;
-  const initialHotkeysObj = safeParseJson(initialHotkeysRaw, {});
+  const initialHotkeysObj = safeParseJson<Record<string, unknown>>(initialHotkeysRaw, {});
   const initialGoMap = typeof initialHotkeysRaw === 'string' ? parseGoMapString(initialHotkeysRaw) : {};
-  const initialCandidate = initialHotkeysObj?.show_window || initialGoMap?.show_window || initialHotkeysRaw;
+  const initialCandidate = initialHotkeysObj['show_window'] || initialGoMap?.show_window || initialHotkeysRaw;
   const initialShowKey = isValidHotkey(initialCandidate) ? initialCandidate : defaultHotkey;
   const [hotkeyShowWindow, setHotkeyShowWindow] = useState<string>(initialShowKey);
   const [isRecordingHotkey, setIsRecordingHotkey] = useState<boolean>(false);
@@ -276,26 +280,30 @@ export const Settings: React.FC = () => {
   useEffect(() => {
     try {
       const hotkeysRaw = getSetting(SETTING_KEYS.USER_HOTKEYS, {});
-      const hotkeys = safeParseJson(hotkeysRaw, {});
+      const hotkeys = safeParseJson<Record<string, unknown>>(hotkeysRaw, {});
       const goMap = typeof hotkeysRaw === 'string' ? parseGoMapString(hotkeysRaw) : {};
-      const candidate = hotkeys?.show_window || goMap?.show_window || hotkeysRaw;
+      const candidate = hotkeys['show_window'] || goMap?.show_window || hotkeysRaw;
       const showKey = isValidHotkey(candidate) ? candidate : defaultHotkey;
       setHotkeyShowWindow(showKey);
       if (isValidHotkey(showKey) && window.electronAPI && typeof window.electronAPI.syncHotkeys === 'function') {
         window.electronAPI.syncHotkeys({ show_window: showKey });
       }
-    } catch (_) {}
-  }, [settings]);
+    } catch {
+      void 0;
+    }
+  }, [getSetting, settings]);
 
   // 同步“关闭按钮行为”到主进程（随设置变化）
   useEffect(() => {
     try {
-      const action = getSetting(SETTING_KEYS.USER_CLOSE_BEHAVIOR, 'minimize');
-      if (window.electronAPI && (window.electronAPI as any).syncCloseBehavior) {
-        (window.electronAPI as any).syncCloseBehavior({ close_action: action });
+      const action = normalizeCloseAction(getSetting(SETTING_KEYS.USER_CLOSE_BEHAVIOR, 'minimize'));
+      if (window.electronAPI && typeof window.electronAPI.syncCloseBehavior === 'function') {
+        window.electronAPI.syncCloseBehavior({ close_action: action });
       }
-    } catch (_) {}
-  }, [settings]);
+    } catch {
+      void 0;
+    }
+  }, [getSetting, settings]);
 
   // 组件挂载时获取设置
   useEffect(() => {
@@ -303,11 +311,13 @@ export const Settings: React.FC = () => {
     setServerUrl(serverConfig.baseUrl);
     
     // 调试信息
+    const authState = useAuthStore.getState();
+    const settingsState = useSettingsStore.getState();
     console.log('Settings组件初始化:', {
-      isAuthenticated,
-      user,
-      settingsCount: Object.keys(settings).length,
-      settings: settings
+      isAuthenticated: authState.isAuthenticated,
+      user: authState.user,
+      settingsCount: Object.keys(settingsState.settings || {}).length,
+      settings: settingsState.settings
     });
     
     // 只有在已认证的情况下才获取设置
@@ -324,7 +334,7 @@ export const Settings: React.FC = () => {
   }, [fetchSettings, isAuthenticated, serverConfig.baseUrl]);
 
   // 保存设置的通用处理
-  const handleSave = async (key: string, value: any) => {
+  const handleSave = async (key: string, value: unknown) => {
     console.log('开始保存设置:', { key, value, isAuthenticated, user });
     setSaveStatus('saving');
     try {
@@ -449,8 +459,8 @@ export const Settings: React.FC = () => {
           onChange={async (value) => {
             await handleSave(SETTING_KEYS.USER_CLOSE_BEHAVIOR, value);
             try {
-              if (window.electronAPI && (window.electronAPI as any).syncCloseBehavior) {
-                await (window.electronAPI as any).syncCloseBehavior({ close_action: value });
+              if (window.electronAPI && typeof window.electronAPI.syncCloseBehavior === 'function') {
+                await window.electronAPI.syncCloseBehavior({ close_action: normalizeCloseAction(value) });
               }
             } catch (e) {
               console.warn('同步关闭行为到主进程失败:', e);
@@ -703,7 +713,7 @@ export const Settings: React.FC = () => {
                     });
                     setSaveStatus('saved');
                     setTimeout(() => setSaveStatus('idle'), 2000);
-                  } catch (error) {
+                  } catch {
                     setSaveStatus('error');
                     setTimeout(() => setSaveStatus('idle'), 2000);
                   }

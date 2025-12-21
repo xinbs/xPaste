@@ -11,7 +11,7 @@
     "preview": "cd frontend && vite preview",
     "check": "cd frontend && tsc -b --noEmit",
     "electron": "electron .",
-    "electron:dev": "electron .",
+    "electron:dev": "node -e \"const {spawn}=require('child_process'); const http=require('http'); const https=require('https'); const path=require('path'); const urlStr=process.env.DESKTOP_DEV_SERVER_URL||process.env.VITE_DEV_SERVER_URL||'http://localhost:5173'; const url=new URL(urlStr); const isWin=process.platform==='win32'; const pnpm=isWin?'pnpm':'pnpm'; const client=url.protocol==='https:'?https:http; const wait=()=>new Promise(r=>{const tick=()=>{const req=client.get(urlStr,res=>{res.resume(); r();}); req.on('error',()=>setTimeout(tick,300));}; tick();}); const spawnCmd=(cmd,args,opts={})=>spawn(cmd,args,{stdio:'inherit',shell:isWin,...opts}); const frontCwd=path.join(process.cwd(),'frontend'); const vite=spawnCmd(pnpm,['exec','vite','--host',url.hostname,'--port',String(url.port||5173),'--strictPort'],{cwd:frontCwd,env:{...process.env}}); const killAll=()=>{try{vite.kill()}catch(_){}}; process.on('SIGINT',()=>{killAll(); process.exit(130);}); process.on('SIGTERM',()=>{killAll(); process.exit(143);}); wait().then(()=>{const electron=spawnCmd(pnpm,['run','electron'],{env:{...process.env,DESKTOP_DEV_SERVER_URL:urlStr}}); electron.on('exit',code=>{killAll(); process.exit(code??0);});});\"",
     "gen:mac-icon": "node create-platform-icons.cjs",
     "build:fast": "./fast-build.sh",
     "build:win": "npm run build && electron-builder --win",

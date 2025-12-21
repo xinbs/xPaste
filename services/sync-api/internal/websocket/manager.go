@@ -27,17 +27,17 @@ var upgrader = websocket.Upgrader{
 type MessageType string
 
 const (
-	MessageTypeClipSync     MessageType = "clip_sync"     // 剪贴板同步
-	MessageTypeClipNew      MessageType = "clip_new"      // 新剪贴板项
-	MessageTypeClipUpdate   MessageType = "clip_update"   // 剪贴板项更新
-	MessageTypeClipDelete   MessageType = "clip_delete"   // 剪贴板项删除
-	MessageTypeDeviceOnline MessageType = "device_online" // 设备上线
+	MessageTypeClipSync      MessageType = "clip_sync"      // 剪贴板同步
+	MessageTypeClipNew       MessageType = "clip_new"       // 新剪贴板项
+	MessageTypeClipUpdate    MessageType = "clip_update"    // 剪贴板项更新
+	MessageTypeClipDelete    MessageType = "clip_delete"    // 剪贴板项删除
+	MessageTypeDeviceOnline  MessageType = "device_online"  // 设备上线
 	MessageTypeDeviceOffline MessageType = "device_offline" // 设备下线
-	MessageTypeDeviceUpdate MessageType = "device_update" // 设备更新
-	MessageTypeHeartbeat    MessageType = "heartbeat"     // 心跳
-	MessageTypePing         MessageType = "ping"          // Ping
-	MessageTypePong         MessageType = "pong"          // Pong
-	MessageTypeError        MessageType = "error"         // 错误
+	MessageTypeDeviceUpdate  MessageType = "device_update"  // 设备更新
+	MessageTypeHeartbeat     MessageType = "heartbeat"      // 心跳
+	MessageTypePing          MessageType = "ping"           // Ping
+	MessageTypePong          MessageType = "pong"           // Pong
+	MessageTypeError         MessageType = "error"          // 错误
 )
 
 // Message WebSocket 消息结构
@@ -62,13 +62,17 @@ type Client struct {
 
 // Manager WebSocket 连接管理器
 type Manager struct {
-	clients    map[string]*Client    // 所有客户端连接
-	userClients map[uint][]*Client   // 按用户分组的客户端
+	clients       map[string]*Client // 所有客户端连接
+	userClients   map[uint][]*Client // 按用户分组的客户端
 	deviceClients map[string]*Client // 按设备分组的客户端
-	register   chan *Client         // 注册客户端通道
-	unregister chan *Client         // 注销客户端通道
-	broadcast  chan Message         // 广播消息通道
-	mu         sync.RWMutex         // 读写锁
+	register      chan *Client       // 注册客户端通道
+	unregister    chan *Client       // 注销客户端通道
+	broadcast     chan Message       // 广播消息通道
+	mu            sync.RWMutex       // 读写锁
+}
+
+func (m *Manager) deviceKey(userID uint, deviceID string) string {
+	return strconv.FormatUint(uint64(userID), 10) + ":" + deviceID
 }
 
 // NewManager 创建新的 WebSocket 管理器
@@ -90,7 +94,7 @@ func (m *Manager) Register(client *Client) {
 
 	m.clients[client.ID] = client
 	m.userClients[client.UserID] = append(m.userClients[client.UserID], client)
-	m.deviceClients[client.DeviceID] = client
+	m.deviceClients[m.deviceKey(client.UserID, client.DeviceID)] = client
 }
 
 // Unregister 注销客户端
@@ -114,8 +118,8 @@ func (m *Manager) Unregister(client *Client) {
 		}
 	}
 
-	if _, ok := m.deviceClients[client.DeviceID]; ok {
-		delete(m.deviceClients, client.DeviceID)
+	if _, ok := m.deviceClients[m.deviceKey(client.UserID, client.DeviceID)]; ok {
+		delete(m.deviceClients, m.deviceKey(client.UserID, client.DeviceID))
 	}
 }
 
@@ -161,11 +165,11 @@ func (m *Manager) SendToUser(userID uint, message Message) {
 }
 
 // SendToDevice 向指定设备发送消息
-func (m *Manager) SendToDevice(deviceID string, message Message) {
+func (m *Manager) SendToDevice(userID uint, deviceID string, message Message) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	if client, exists := m.deviceClients[deviceID]; exists {
+	if client, exists := m.deviceClients[m.deviceKey(userID, deviceID)]; exists {
 		select {
 		case client.Send <- message:
 		default:
@@ -233,11 +237,11 @@ func (m *Manager) GetOnlineDevices(userID uint) []string {
 }
 
 // IsDeviceOnline 检查设备是否在线
-func (m *Manager) IsDeviceOnline(deviceID string) bool {
+func (m *Manager) IsDeviceOnline(userID uint, deviceID string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	_, exists := m.deviceClients[deviceID]
+	_, exists := m.deviceClients[m.deviceKey(userID, deviceID)]
 	return exists
 }
 
@@ -265,10 +269,10 @@ func (m *Manager) GetStats() map[string]interface{} {
 	total, byUser := m.GetClientCount()
 
 	return map[string]interface{}{
-		"total_connections":  total,
-		"users_online":       len(byUser),
+		"total_connections":   total,
+		"users_online":        len(byUser),
 		"connections_by_user": byUser,
-		"devices_online":     len(m.deviceClients),
+		"devices_online":      len(m.deviceClients),
 	}
 }
 

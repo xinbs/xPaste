@@ -34,8 +34,9 @@ export function generateDeviceFingerprint(): string {
         webglFingerprint = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
       }
     }
-  } catch (e) {
+  } catch {
     // WebGL不可用
+    void 0;
   }
   
   // 组合所有特征
@@ -146,10 +147,9 @@ export async function getLocalIPAddress(): Promise<string | null> {
     // 创建数据通道
     pc.createDataChannel('');
     
-    let foundIPv4 = false;
     let bestIPv4: string | null = null;
     let ipv6Fallback: string | null = null;
-    let allIPv4Candidates: string[] = [];
+    const allIPv4Candidates: string[] = [];
     
     // 监听ICE候选
     pc.onicecandidate = (event) => {
@@ -175,7 +175,6 @@ export async function getLocalIPAddress(): Promise<string | null> {
             if (!bestIPv4 || isPreferredIP(ip, bestIPv4)) {
               bestIPv4 = ip;
             }
-            foundIPv4 = true;
           } else if (!bestIPv4 && ip !== '127.0.0.1') {
             // 如果没有内网IP，记录第一个非回环的IPv4地址
             bestIPv4 = ip;
@@ -317,32 +316,6 @@ function isPrivateIPv4(ip: string): boolean {
   
   // 169.254.0.0/16 (链路本地地址)
   if (parts[0] === 169 && parts[1] === 254) return true;
-  
-  return false;
-}
-
-/**
- * 判断是否为私有IP地址（支持IPv4和IPv6）
- */
-function isPrivateIP(ip: string): boolean {
-  // IPv4检查
-  if (ip.includes('.')) {
-    return isPrivateIPv4(ip);
-  }
-  
-  // IPv6检查
-  if (ip.includes(':')) {
-    // ::1 (回环地址)
-    if (ip === '::1') return true;
-    
-    // fe80::/10 (链路本地地址)
-    if (ip.toLowerCase().startsWith('fe80:')) return true;
-    
-    // fc00::/7 (唯一本地地址)
-    if (ip.toLowerCase().startsWith('fc') || ip.toLowerCase().startsWith('fd')) return true;
-    
-    return false;
-  }
   
   return false;
 }

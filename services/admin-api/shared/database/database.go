@@ -9,9 +9,9 @@ import (
 
 	"admin-api/shared/models"
 	"admin-api/shared/utils"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"github.com/glebarez/sqlite"
 )
 
 var DB *gorm.DB
@@ -53,13 +53,29 @@ func InitDatabase() error {
 		dbPath = filepath.Join(wd, dbPath)
 	}
 
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		return fmt.Errorf("创建数据库目录失败: %v", err)
+	}
+
 	// 连接SQLite数据库 - 使用sync-api的数据库文件
 	var err error
-	DB, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+	sqliteParams := "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(1000)&_pragma=temp_store(memory)"
+	dsn := "file:" + filepath.ToSlash(dbPath) + sqliteParams
+	DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
 	})
 	if err != nil {
 		return fmt.Errorf("连接数据库失败: %v", err)
+	}
+
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return fmt.Errorf("获取底层数据库连接失败: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(10)
+	sqlDB.SetMaxIdleConns(5)
+	if err := sqlDB.Ping(); err != nil {
+		return fmt.Errorf("数据库连通性检查失败: %v", err)
 	}
 
 	log.Printf("SQLite数据库连接成功: %s", dbPath)

@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Upload, X, File, Image } from 'lucide-react';
+import { Upload, X, File } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface FileUploadProps {
@@ -19,7 +19,7 @@ export default function FileUpload({
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const validateFile = (file: File): boolean => {
+  const validateFile = useCallback((file: File): boolean => {
     setError(null);
     
     if (file.size > maxSize) {
@@ -28,13 +28,13 @@ export default function FileUpload({
     }
     
     return true;
-  };
+  }, [maxSize]);
 
   const handleFileSelect = useCallback((file: File) => {
     if (validateFile(file)) {
       onFileSelect(file);
     }
-  }, [onFileSelect, maxSize]);
+  }, [onFileSelect, validateFile]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -65,17 +65,6 @@ export default function FileUpload({
 
   const handleClick = () => {
     fileInputRef.current?.click();
-  };
-
-  const getFileIcon = (fileName: string) => {
-    const extension = fileName.split('.').pop()?.toLowerCase();
-    const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'];
-    
-    if (imageExtensions.includes(extension || '')) {
-      return <Image className="w-8 h-8 text-blue-500" />;
-    }
-    
-    return <File className="w-8 h-8 text-gray-500" />;
   };
 
   return (

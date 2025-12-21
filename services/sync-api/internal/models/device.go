@@ -17,28 +17,28 @@ type Device struct {
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 
 	// 关联信息
-	UserID uint `json:"user_id" gorm:"not null;index"`
+	UserID uint `json:"user_id" gorm:"not null;index;uniqueIndex:idx_devices_user_device_id,priority:1"`
 	User   User `json:"user,omitempty" gorm:"foreignKey:UserID"`
 
 	// 设备信息
-	DeviceID    string       `json:"device_id" gorm:"uniqueIndex;not null;size:100"`
-	Name        string       `json:"name" gorm:"not null;size:100"`
-	Platform    DevicePlatform `json:"platform" gorm:"not null"`
-	Version     string       `json:"version" gorm:"size:50"`
-	Model       string       `json:"model" gorm:"size:100"`
-	OSVersion   string       `json:"os_version" gorm:"size:50"`
+	DeviceID  string         `json:"device_id" gorm:"not null;size:100;index;uniqueIndex:idx_devices_user_device_id,priority:2"`
+	Name      string         `json:"name" gorm:"not null;size:100"`
+	Platform  DevicePlatform `json:"platform" gorm:"not null"`
+	Version   string         `json:"version" gorm:"size:50"`
+	Model     string         `json:"model" gorm:"size:100"`
+	OSVersion string         `json:"os_version" gorm:"size:50"`
 
 	// 状态信息
-	Status       DeviceStatus `json:"status" gorm:"default:1"`
-	LastSeen     *time.Time   `json:"last_seen"`
-	LastIP       string       `json:"last_ip" gorm:"size:45"`        // 保留原字段用于兼容性
-	PublicIP     string       `json:"public_ip" gorm:"size:45"`      // 公网IP
-	PrivateIP    string       `json:"private_ip" gorm:"size:45"`     // 内网IP
-	IsOnline     bool         `json:"is_online" gorm:"default:false"`
-	LastSyncAt   *time.Time   `json:"last_sync_at"` 
+	Status     DeviceStatus `json:"status" gorm:"default:1"`
+	LastSeen   *time.Time   `json:"last_seen"`
+	LastIP     string       `json:"last_ip" gorm:"size:45"`    // 保留原字段用于兼容性
+	PublicIP   string       `json:"public_ip" gorm:"size:45"`  // 公网IP
+	PrivateIP  string       `json:"private_ip" gorm:"size:45"` // 内网IP
+	IsOnline   bool         `json:"is_online" gorm:"default:false"`
+	LastSyncAt *time.Time   `json:"last_sync_at"`
 
 	// 设备特性
-	Capabilities DeviceCapabilities `json:"capabilities" gorm:"type:text"`
+	Capabilities DeviceCapabilities     `json:"capabilities" gorm:"type:text"`
 	Settings     map[string]interface{} `json:"settings" gorm:"type:text;serializer:json"`
 
 	// 关联关系 - 暂时移除以避免循环引用
@@ -61,10 +61,10 @@ const (
 type DeviceStatus int
 
 const (
-	DeviceStatusInactive DeviceStatus = 0 // 未激活
-	DeviceStatusActive   DeviceStatus = 1 // 正常
+	DeviceStatusInactive  DeviceStatus = 0 // 未激活
+	DeviceStatusActive    DeviceStatus = 1 // 正常
 	DeviceStatusSuspended DeviceStatus = 2 // 暂停
-	DeviceStatusRevoked  DeviceStatus = 3 // 已撤销
+	DeviceStatusRevoked   DeviceStatus = 3 // 已撤销
 )
 
 // String 返回设备状态的字符串表示
@@ -156,42 +156,42 @@ func (d *Device) UpdateSyncTime() {
 
 // RegisterDeviceRequest 注册设备请求
 type RegisterDeviceRequest struct {
-	DeviceID     string              `json:"device_id,omitempty"` // 前端传递的设备ID，可选
-	Name         string              `json:"name" binding:"required,min=1,max=100"`
-	Platform     DevicePlatform      `json:"platform" binding:"required"`
-	Version      string              `json:"version" binding:"max=50"`
-	Model        string              `json:"model" binding:"max=100"`
-	OSVersion    string              `json:"os_version" binding:"max=50"`
+	DeviceID     string             `json:"device_id,omitempty"` // 前端传递的设备ID，可选
+	Name         string             `json:"name" binding:"required,min=1,max=100"`
+	Platform     DevicePlatform     `json:"platform" binding:"required"`
+	Version      string             `json:"version" binding:"max=50"`
+	Model        string             `json:"model" binding:"max=100"`
+	OSVersion    string             `json:"os_version" binding:"max=50"`
 	Capabilities DeviceCapabilities `json:"capabilities"`
-	ClientIP     string              `json:"client_ip,omitempty"`     // 客户端传递的IP地址
-	PrivateIP    string              `json:"private_ip,omitempty"`    // 客户端传递的内网IP地址
+	ClientIP     string             `json:"client_ip,omitempty"`  // 客户端传递的IP地址
+	PrivateIP    string             `json:"private_ip,omitempty"` // 客户端传递的内网IP地址
 }
 
 // UpdateDeviceRequest 更新设备请求
 type UpdateDeviceRequest struct {
-	Name         *string              `json:"name" binding:"omitempty,min=1,max=100"`
-	Version      *string              `json:"version" binding:"omitempty,max=50"`
-	Model        *string              `json:"model" binding:"omitempty,max=100"`
-	OSVersion    *string              `json:"os_version" binding:"omitempty,max=50"`
-	Capabilities *DeviceCapabilities `json:"capabilities"`
+	Name         *string                `json:"name" binding:"omitempty,min=1,max=100"`
+	Version      *string                `json:"version" binding:"omitempty,max=50"`
+	Model        *string                `json:"model" binding:"omitempty,max=100"`
+	OSVersion    *string                `json:"os_version" binding:"omitempty,max=50"`
+	Capabilities *DeviceCapabilities    `json:"capabilities"`
 	Settings     map[string]interface{} `json:"settings"`
 }
 
 // DeviceResponse 设备响应
 type DeviceResponse struct {
-	ID           uint                `json:"id"`
-	DeviceID     string              `json:"device_id"`
-	Name         string              `json:"name"`
-	Platform     DevicePlatform      `json:"platform"`
-	Version      string              `json:"version"`
-	Model        string              `json:"model"`
-	OSVersion    string              `json:"os_version"`
-	Status       string              `json:"status"`
-	LastSeen     *time.Time          `json:"last_seen"`
-	IsOnline     bool                `json:"is_online"`
-	LastSyncAt   *time.Time          `json:"last_sync_at"`
+	ID           uint               `json:"id"`
+	DeviceID     string             `json:"device_id"`
+	Name         string             `json:"name"`
+	Platform     DevicePlatform     `json:"platform"`
+	Version      string             `json:"version"`
+	Model        string             `json:"model"`
+	OSVersion    string             `json:"os_version"`
+	Status       string             `json:"status"`
+	LastSeen     *time.Time         `json:"last_seen"`
+	IsOnline     bool               `json:"is_online"`
+	LastSyncAt   *time.Time         `json:"last_sync_at"`
 	Capabilities DeviceCapabilities `json:"capabilities"`
-	RegisteredAt time.Time           `json:"registered_at"`
+	RegisteredAt time.Time          `json:"registered_at"`
 }
 
 // ToResponse 转换为响应格式

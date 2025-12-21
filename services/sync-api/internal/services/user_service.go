@@ -226,10 +226,17 @@ func (s *UserService) ActivateUser(userID uint) error {
 
 // DeleteUser 删除用户（软删除）
 func (s *UserService) DeleteUser(userID uint) error {
-	if err := s.db.Delete(&models.User{}, userID).Error; err != nil {
-		return fmt.Errorf("failed to delete user: %w", err)
-	}
-	return nil
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ?", userID).Delete(&models.Device{}).Error; err != nil {
+			return fmt.Errorf("failed to delete user devices: %w", err)
+		}
+
+		if err := tx.Delete(&models.User{}, userID).Error; err != nil {
+			return fmt.Errorf("failed to delete user: %w", err)
+		}
+
+		return nil
+	})
 }
 
 // GetUserStats 获取用户统计信息
@@ -302,7 +309,7 @@ func (s *UserService) SearchUsers(query string, params *models.PaginationParams)
 	var total int64
 
 	// 构建搜索条件
-	searchQuery := s.db.Model(&models.User{}).Where("username LIKE ? OR email LIKE ? OR display_name LIKE ?", 
+	searchQuery := s.db.Model(&models.User{}).Where("username LIKE ? OR email LIKE ? OR display_name LIKE ?",
 		"%"+query+"%", "%"+query+"%", "%"+query+"%")
 
 	// 计算总数

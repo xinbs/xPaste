@@ -1,5 +1,12 @@
 import { useConfigStore } from '@/store/config';
 
+type Pagination = {
+  page?: number;
+  page_size?: number;
+  total?: number;
+  total_pages?: number;
+};
+
 class ApiClient {
   private token: string | null = null;
   private refreshTokenValue: string | null = null;
@@ -8,7 +15,7 @@ class ApiClient {
   private isRefreshing: boolean = false;
   private failedRequestsQueue: Array<{
     resolve: (value: unknown) => void;
-    reject: (reason?: any) => void;
+    reject: (reason?: unknown) => void;
   }> = [];
 
   constructor() {
@@ -56,7 +63,7 @@ class ApiClient {
     return this.request<T>(endpoint, { ...options, method: 'GET' });
   }
 
-  async post<T>(endpoint: string, data?: any, options: RequestInit = {}): Promise<T> {
+  async post<T>(endpoint: string, data?: unknown, options: RequestInit = {}): Promise<T> {
     return this.request<T>(endpoint, {
       ...options,
       method: 'POST',
@@ -64,7 +71,7 @@ class ApiClient {
     });
   }
 
-  async put<T>(endpoint: string, data?: any, options: RequestInit = {}): Promise<T> {
+  async put<T>(endpoint: string, data?: unknown, options: RequestInit = {}): Promise<T> {
     return this.request<T>(endpoint, {
       ...options,
       method: 'PUT',
@@ -208,7 +215,7 @@ class ApiClient {
                   this.failedRequestsQueue.push({ resolve, reject });
                 });
               }
-            } catch (refreshError) {
+            } catch {
               // 刷新失败，清除状态并登出
               this.isRefreshing = false;
               this.failedRequestsQueue = [];
@@ -239,8 +246,8 @@ class ApiClient {
   }
 
   // 认证相关API
-  async login(username: string, password: string, deviceId?: string, privateIP?: string | null) {
-    const requestBody: any = { username, password };
+  async login<TUser = unknown>(username: string, password: string, deviceId?: string, privateIP?: string | null) {
+    const requestBody: Record<string, unknown> = { username, password };
     if (deviceId) {
       requestBody.device_id = deviceId;
     }
@@ -251,7 +258,7 @@ class ApiClient {
     const response = await this.request<{
       success: boolean;
       message: string;
-      data: { access_token: string; refresh_token?: string; user: any };
+      data: { access_token: string; refresh_token?: string; user: TUser };
     }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify(requestBody),
@@ -271,7 +278,7 @@ class ApiClient {
     return this.request<{
       success: boolean;
       message: string;
-      data: any;
+      data: unknown;
     }>('/auth/register', {
       method: 'POST',
       body: JSON.stringify({ username, email, password }),
@@ -279,7 +286,7 @@ class ApiClient {
   }
 
   // 设备相关API
-  async registerDevice(deviceInfo: {
+  async registerDevice<TDevice = unknown>(deviceInfo: {
     device_id?: string;
     name: string;
     platform: string;
@@ -298,18 +305,18 @@ class ApiClient {
     return this.request<{
       success: boolean;
       message: string;
-      data: any;
+      data: TDevice;
     }>('/devices/register', {
       method: 'POST',
       body: JSON.stringify(deviceInfo),
     });
   }
 
-  async getDevices(signal?: AbortSignal) {
+  async getDevices<TDevice = unknown>(signal?: AbortSignal) {
     return this.request<{
       success: boolean;
       message: string;
-      data: { items: any[]; pagination: any };
+      data: { items: TDevice[]; pagination: Pagination };
     }>('/devices?page=1&limit=100', {
       signal,
     });
@@ -319,7 +326,7 @@ class ApiClient {
     return this.request<{
       success: boolean;
       message: string;
-      data: any;
+      data: unknown;
     }>(`/devices/${deviceId}`, {
       method: 'PUT',
       body: JSON.stringify(updateData),
@@ -330,14 +337,14 @@ class ApiClient {
     return this.request<{
       success: boolean;
       message: string;
-      data: any;
+      data: unknown;
     }>(`/devices/${deviceId}`, {
       method: 'DELETE',
     });
   }
 
   // 剪贴板相关API
-  async getClipItems(params: { page: number; pageSize: number }, signal?: AbortSignal) {
+  async getClipItems<TClipItem = unknown>(params: { page: number; pageSize: number }, signal?: AbortSignal) {
     const query = new URLSearchParams({
       page: String(params.page),
       limit: String(params.pageSize),
@@ -345,13 +352,13 @@ class ApiClient {
     return this.request<{
       success: boolean;
       message: string;
-      data: { items: any[]; pagination: any };
+      data: { items: TClipItem[]; pagination: Pagination };
     }>(`/clips?${query}`, {
       signal,
     });
   }
 
-  async searchClipItems(params: { q: string; page?: number; limit?: number }, signal?: AbortSignal) {
+  async searchClipItems<TClipItem = unknown>(params: { q: string; page?: number; limit?: number }, signal?: AbortSignal) {
     const query = new URLSearchParams();
     query.set('q', params.q);
     if (params.page != null) query.set('page', String(params.page));
@@ -359,22 +366,22 @@ class ApiClient {
     return this.request<{
       success: boolean;
       message: string;
-      data: { items: any[]; pagination: any };
+      data: { items: TClipItem[]; pagination: Pagination };
     }>(`/clips/search?${query.toString()}`, {
       signal,
     });
   }
 
-  async createClipItem(clipData: {
+  async createClipItem<TClipItem = unknown>(clipData: {
     type: string;
     content?: string;
     file_path?: string;
-    metadata?: any;
+    metadata?: unknown;
   }) {
     return this.request<{
       success: boolean;
       message: string;
-      data: any;
+      data: TClipItem;
     }>('/clips', {
       method: 'POST',
       body: JSON.stringify(clipData),
@@ -385,7 +392,7 @@ class ApiClient {
     return this.request<{
       success: boolean;
       message: string;
-      data: any;
+      data: unknown;
     }>(`/clips/${id}`, {
       method: 'DELETE',
     });
@@ -430,7 +437,7 @@ class ApiClient {
     return this.request<{
       success: boolean;
       message: string;
-      data: any;
+      data: unknown;
     }>('/notes/push', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -444,7 +451,7 @@ class ApiClient {
     return this.request<{
       success: boolean;
       message: string;
-      data: any;
+      data: unknown;
     }>('/notes/push-batch', {
       method: 'POST',
       body: JSON.stringify({ items }),
@@ -458,8 +465,7 @@ class ApiClient {
   ) {
     const formData = new FormData();
     const name = opts.filename || `attachment-${Date.now()}`;
-    const blob = fileData instanceof Blob ? fileData : new Blob([fileData], { type: (fileData as any).type || 'application/octet-stream' });
-    formData.append('file', blob, name);
+    formData.append('file', fileData, name);
     if (opts.filename) formData.append('filename', opts.filename);
     if (typeof opts.noteDir === 'string') formData.append('note_dir', opts.noteDir);
     if (typeof opts.pathRel === 'string') formData.append('path_rel', opts.pathRel);
@@ -491,6 +497,23 @@ class ApiClient {
     return response.json();
   }
 
+  // 获取云端笔记列表
+  async listNotebookNotes(opts: { noteDir?: string; useData?: boolean } = {}) {
+    const params = new URLSearchParams();
+    if (opts.noteDir) params.set('note_dir', opts.noteDir);
+    if (opts.useData) params.set('use_data', 'true');
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: {
+        items?: string[];
+        items_meta?: { path: string; mtime_ms?: number; size_bytes?: number }[];
+        count?: number;
+      };
+    }>(`/notes/list${qs}`, { method: 'GET' });
+  }
+
   // 获取云端笔记内容
   async getNotebookNote(opts: { filename: string; noteDir?: string; useData?: boolean }) {
     const params = new URLSearchParams();
@@ -501,8 +524,38 @@ class ApiClient {
     return this.request<{
       success: boolean;
       message: string;
-      data: any;
+      data: { content?: unknown } & Record<string, unknown>;
     }>(`/notes/get${qs}`, { method: 'GET' });
+  }
+
+  // 获取云端笔记变更事件（增量）
+  async getNotebookNoteChanges(opts: { since?: number; limit?: number; useData?: boolean } = {}) {
+    const params = new URLSearchParams();
+    if (typeof opts.since === 'number' && Number.isFinite(opts.since)) params.set('since', String(opts.since));
+    if (typeof opts.limit === 'number' && Number.isFinite(opts.limit)) params.set('limit', String(opts.limit));
+    if (opts.useData) params.set('use_data', 'true');
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: {
+        items?: { token: number; event_type?: string; note_key?: string; mtime_ms?: number; size_bytes?: number; content_hash?: string }[];
+        since?: number;
+        next_token?: number;
+        max_token?: number;
+        has_more?: boolean;
+      };
+    }>(`/notes/changes${qs}`, { method: 'GET' });
+  }
+
+  // 确认已处理的云端变更事件游标
+  async ackNotebookNoteChanges(opts: { lastToken: number; useData?: boolean }) {
+    const payload = { last_token: opts.lastToken, use_data: !!opts.useData };
+    return this.request<{
+      success: boolean;
+      message: string;
+      data: unknown;
+    }>('/notes/ack', { method: 'POST', body: JSON.stringify(payload) });
   }
 
   // 健康检查

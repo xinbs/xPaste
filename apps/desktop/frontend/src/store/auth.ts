@@ -94,7 +94,7 @@ export const useAuthStore = create<AuthState>()(
 
         try {
           // 尝试调用一个需要认证的API来验证token
-          const response = await apiClient.get<{success: boolean; message: string; data: any}>('/auth/profile');
+          const response = await apiClient.get<{success: boolean; message: string; data: User}>('/auth/profile');
           if (response.success) {
             // token有效，更新用户信息
             set({ user: response.data });
@@ -104,7 +104,7 @@ export const useAuthStore = create<AuthState>()(
             get().logout();
             return false;
           }
-        } catch (error) {
+        } catch {
           // token无效，清除认证状态
           get().logout();
           return false;
@@ -115,7 +115,7 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null });
         try {
           // 获取当前设备ID和IP地址
-          const response = await apiClient.login(username, password);
+          const response = await apiClient.login<User>(username, password);
           if (response.success) {
             set({
               user: response.data.user,
@@ -139,7 +139,7 @@ export const useAuthStore = create<AuthState>()(
             // 登录成功后获取设备列表并设置当前设备
             try {
               // 先获取设备列表
-              const devicesResponse = await apiClient.getDevices();
+              const devicesResponse = await apiClient.getDevices<Device>();
               if (devicesResponse.success) {
               const devices = devicesResponse.data.items;
               const deviceId = getOrCreateDeviceId();
@@ -176,7 +176,7 @@ export const useAuthStore = create<AuthState>()(
                     private_ip: localIP || undefined
                   };
                   
-                  const deviceResponse = await apiClient.registerDevice(deviceInfo);
+                  const deviceResponse = await apiClient.registerDevice<Device>(deviceInfo);
                   if (deviceResponse.success) {
                     const newDevice = deviceResponse.data;
                     set({ 
@@ -212,10 +212,10 @@ export const useAuthStore = create<AuthState>()(
                     },
                     private_ip: localIP || undefined
                   };
-                  const retryResponse = await apiClient.registerDevice(retryInfo);
+                  const retryResponse = await apiClient.registerDevice<Device>(retryInfo);
                   if (retryResponse.success) {
                     const newDevice = retryResponse.data;
-                    const devicesResponse = await apiClient.getDevices();
+                    const devicesResponse = await apiClient.getDevices<Device>();
                     const devices = devicesResponse.success ? devicesResponse.data.items : [];
                     set({
                       devices: devices.length ? devices : [newDevice],
@@ -223,7 +223,7 @@ export const useAuthStore = create<AuthState>()(
                     });
                   }
                 }
-              } catch {}
+              } catch { void 0 }
             }
             
             return true;
@@ -289,7 +289,7 @@ export const useAuthStore = create<AuthState>()(
             private_ip: localIP || undefined
           };
           
-          const response = await apiClient.registerDevice(deviceInfoWithId);
+          const response = await apiClient.registerDevice<Device>(deviceInfoWithId);
           if (response.success) {
             const newDevice = response.data;
             set({
@@ -309,7 +309,7 @@ export const useAuthStore = create<AuthState>()(
               const { clearDeviceId, getOrCreateDeviceId } = await import('../lib/device');
               clearDeviceId();
               const regeneratedId = getOrCreateDeviceId();
-              const retryResponse = await apiClient.registerDevice({ ...deviceInfo, device_id: regeneratedId });
+              const retryResponse = await apiClient.registerDevice<Device>({ ...deviceInfo, device_id: regeneratedId });
               if (retryResponse.success) {
                 const newDevice = retryResponse.data;
                 set({
@@ -319,7 +319,7 @@ export const useAuthStore = create<AuthState>()(
                 });
                 return true;
               }
-            } catch {}
+            } catch { void 0 }
           }
           set({ error: errorMessage, isLoading: false });
           useToastStore.getState().showError('设备注册失败', errorMessage);
@@ -332,7 +332,7 @@ export const useAuthStore = create<AuthState>()(
         console.log('设备Store: 开始获取设备列表...');
         
         try {
-          const response = await apiClient.getDevices(signal);
+          const response = await apiClient.getDevices<Device>(signal);
           console.log('设备Store: API响应', {
             success: response.success,
             message: response.message,
@@ -346,7 +346,7 @@ export const useAuthStore = create<AuthState>()(
             const { currentDevice } = get();
             
             // 检查currentDevice是否仍然存在于设备列表中
-            let updatedCurrentDevice = currentDevice;
+            const updatedCurrentDevice = currentDevice;
             if (currentDevice && devices.length > 0 && !devices.find(device => device.id === currentDevice.id)) {
               console.warn('当前设备不在设备列表中，但保持currentDevice状态以避免数据丢失');
             }

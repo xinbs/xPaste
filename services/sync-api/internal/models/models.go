@@ -196,6 +196,7 @@ var (
 	ErrTokenExpired      = errors.New("token expired")
 	ErrInvalidToken      = errors.New("invalid token")
 	ErrDeviceNotFound    = errors.New("device not found")
+	ErrDeviceIDAlreadyExists = errors.New("device id already exists")
 	ErrClipItemNotFound  = errors.New("clip item not found")
 	ErrClipNotFound      = errors.New("clip item not found")
 	ErrClipItemExpired   = errors.New("clip item expired")

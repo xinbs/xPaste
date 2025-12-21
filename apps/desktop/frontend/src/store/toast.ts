@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ToastMessage, ToastType } from '../components/Toast';
+import { ToastMessage } from '../components/Toast';
 
 interface ToastStore {
   toasts: ToastMessage[];

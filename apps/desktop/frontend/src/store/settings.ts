@@ -31,6 +31,74 @@ export const SETTING_KEYS = {
   NOTEBOOK_AUTO_SYNC_ATTACHMENTS: 'notebook.auto_sync_attachments',
 } as const;
 
+type Widen<T> = T extends string ? string : T extends number ? number : T extends boolean ? boolean : T;
+type GetSetting = {
+  <T>(key: string, defaultValue: T): Widen<T>;
+  (key: string, defaultValue?: undefined): unknown;
+};
+
+const LOCAL_ONLY_SETTING_KEYS = new Set<string>([
+  SETTING_KEYS.NOTEBOOK_DEFAULT_DIR,
+  SETTING_KEYS.NOTEBOOK_DEFAULT_FILE,
+]);
+
+function localStorageKeyForSettingKey(key: string) {
+  if (key === SETTING_KEYS.NOTEBOOK_DEFAULT_DIR) return 'xpaste-notebook-default-dir';
+  if (key === SETTING_KEYS.NOTEBOOK_DEFAULT_FILE) return 'xpaste-notebook-default-file';
+  return '';
+}
+
+function readLocalOnlySettingValue(key: string) {
+  const storageKey = localStorageKeyForSettingKey(key);
+  if (!storageKey) return '';
+  try {
+    if (typeof localStorage === 'undefined') return '';
+    return localStorage.getItem(storageKey) || '';
+  } catch {
+    return '';
+  }
+}
+
+function writeLocalOnlySettingValue(key: string, value: unknown) {
+  const storageKey = localStorageKeyForSettingKey(key);
+  if (!storageKey) return;
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(storageKey, String(value ?? ''));
+  } catch {
+    return;
+  }
+}
+
+function removeLocalOnlySettingValue(key: string) {
+  const storageKey = localStorageKeyForSettingKey(key);
+  if (!storageKey) return;
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.removeItem(storageKey);
+  } catch {
+    return;
+  }
+}
+
+function createLocalSetting(key: string, value: unknown): Setting {
+  const str = String(value ?? '');
+  return {
+    id: 0,
+    key,
+    value: str,
+    type: 'string',
+    category: 'local',
+    description: '',
+    is_readonly: false,
+    is_encrypted: false,
+    default_value: '',
+    metadata: {},
+    created_at: '',
+    updated_at: '',
+  };
+}
+
 // 设置分组
 export const SETTING_GROUPS = {
   GENERAL: 'general',
@@ -49,12 +117,12 @@ interface SettingsState {
   
   // 操作方法
   fetchSettings: (category?: string) => Promise<void>;
-  getSetting: (key: string, defaultValue?: any) => any;
-  setSetting: (key: string, value: any) => Promise<void>;
-  batchSetSettings: (settings: Record<string, any>) => Promise<void>;
+  getSetting: GetSetting;
+  setSetting: (key: string, value: unknown) => Promise<void>;
+  batchSetSettings: (settings: Record<string, unknown>) => Promise<void>;
   resetSetting: (key: string) => Promise<void>;
-  exportSettings: () => Promise<Record<string, any>>;
-  importSettings: (settings: Record<string, any>) => Promise<void>;
+  exportSettings: () => Promise<Record<string, unknown>>;
+  importSettings: (settings: Record<string, unknown>) => Promise<void>;
   clearError: () => void;
   
   // 便捷方法
@@ -88,6 +156,14 @@ export const useSettingsStore = create<SettingsState>()((
             acc[setting.key] = setting;
             return acc;
           }, {} as Record<string, Setting>);
+          for (const k of LOCAL_ONLY_SETTING_KEYS) delete settingsMap[k];
+          const prev = get().settings;
+          for (const k of LOCAL_ONLY_SETTING_KEYS) {
+            const prevSetting = prev?.[k];
+            const prevVal = prevSetting && prevSetting.category === 'local' ? prevSetting.value : '';
+            const localVal = prevVal && String(prevVal).length > 0 ? String(prevVal) : readLocalOnlySettingValue(k);
+            if (localVal && localVal.length > 0) settingsMap[k] = createLocalSetting(k, localVal);
+          }
           console.log('设置映射:', settingsMap);
           
           set({ settings: settingsMap, isLoading: false });
@@ -100,7 +176,7 @@ export const useSettingsStore = create<SettingsState>()((
       },
       
       // 获取单个设置值
-      getSetting: (key: string, defaultValue?: any) => {
+      getSetting: ((key: string, defaultValue?: unknown) => {
         const { settings } = get();
         const setting = settings[key];
         console.log(`获取设置 ${key}:`, {
@@ -112,19 +188,19 @@ export const useSettingsStore = create<SettingsState>()((
         if (!setting) return defaultValue;
         
         // 根据类型转换值（健壮处理布尔字符串、数字字符串等）
-        const parseBool = (val: any) => {
+        const parseBool = (val: unknown) => {
           if (typeof val === 'boolean') return val;
           if (typeof val === 'number') return val !== 0;
           if (typeof val === 'string') {
             const v = val.trim().toLowerCase();
             if (v === 'true' || v === '1' || v === 'yes' || v === 'on') return true;
             if (v === 'false' || v === '0' || v === 'no' || v === 'off' || v === '') return false;
-            try { const j = JSON.parse(v); if (typeof j === 'boolean') return j; } catch {}
+            try { const j = JSON.parse(v); if (typeof j === 'boolean') return j; } catch { void 0; }
           }
           return !!val;
         };
 
-        let convertedValue;
+        let convertedValue: unknown;
         const raw = setting.value;
         const type = setting.type;
         if (type === 'boolean') {
@@ -151,10 +227,22 @@ export const useSettingsStore = create<SettingsState>()((
         }
         console.log(`设置 ${key} 转换后的值:`, convertedValue);
         return convertedValue;
-      },
+      }) as GetSetting,
       
       // 设置单个设置
-      setSetting: async (key: string, value: any) => {
+      setSetting: async (key: string, value: unknown) => {
+        if (LOCAL_ONLY_SETTING_KEYS.has(key)) {
+          writeLocalOnlySettingValue(key, value);
+          set(state => ({
+            settings: {
+              ...state.settings,
+              [key]: createLocalSetting(key, value),
+            },
+            isLoading: false,
+            error: null,
+          }));
+          return;
+        }
         set({ isLoading: true, error: null });
         try {
           const setting = await settingsApi.setUserSetting(key, value);
@@ -173,12 +261,29 @@ export const useSettingsStore = create<SettingsState>()((
       },
       
       // 批量设置
-      batchSetSettings: async (settings: Record<string, any>) => {
+      batchSetSettings: async (settings: Record<string, unknown>) => {
         set({ isLoading: true, error: null });
         try {
-          await settingsApi.batchSetUserSettings(settings);
-          // 重新获取设置
-          await get().fetchSettings();
+          const remote: Record<string, unknown> = {};
+          const localOnly: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(settings || {})) {
+            if (LOCAL_ONLY_SETTING_KEYS.has(k)) localOnly[k] = v;
+            else remote[k] = v;
+          }
+          if (Object.keys(localOnly).length > 0) {
+            for (const [k, v] of Object.entries(localOnly)) writeLocalOnlySettingValue(k, v);
+            set(state => {
+              const next = { ...state.settings };
+              for (const [k, v] of Object.entries(localOnly)) next[k] = createLocalSetting(k, v);
+              return { settings: next };
+            });
+          }
+          if (Object.keys(remote).length > 0) {
+            await settingsApi.batchSetUserSettings(remote);
+            await get().fetchSettings();
+          } else {
+            set({ isLoading: false, error: null });
+          }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : '批量设置失败';
           set({ error: errorMessage, isLoading: false });
@@ -188,6 +293,15 @@ export const useSettingsStore = create<SettingsState>()((
       
       // 重置设置
       resetSetting: async (key: string) => {
+        if (LOCAL_ONLY_SETTING_KEYS.has(key)) {
+          removeLocalOnlySettingValue(key);
+          set(state => {
+            const next = { ...state.settings };
+            delete next[key];
+            return { settings: next, isLoading: false, error: null };
+          });
+          return;
+        }
         set({ isLoading: true, error: null });
         try {
           await settingsApi.deleteUserSetting(key);
@@ -216,7 +330,7 @@ export const useSettingsStore = create<SettingsState>()((
       },
       
       // 导入设置
-      importSettings: async (settings: Record<string, any>) => {
+      importSettings: async (settings: Record<string, unknown>) => {
         set({ isLoading: true, error: null });
         try {
           await settingsApi.importUserSettings(settings);
@@ -233,16 +347,16 @@ export const useSettingsStore = create<SettingsState>()((
       clearError: () => set({ error: null }),
       
       // 便捷方法
-      getTheme: () => get().getSetting(SETTING_KEYS.USER_THEME, 'light'),
+      getTheme: () => get().getSetting(SETTING_KEYS.USER_THEME, 'light') as string,
       setTheme: (theme: string) => get().setSetting(SETTING_KEYS.USER_THEME, theme),
       
-      getLanguage: () => get().getSetting(SETTING_KEYS.USER_LANGUAGE, 'zh-CN'),
+      getLanguage: () => get().getSetting(SETTING_KEYS.USER_LANGUAGE, 'zh-CN') as string,
       setLanguage: (language: string) => get().setSetting(SETTING_KEYS.USER_LANGUAGE, language),
       
-      getAutoSync: () => get().getSetting(SETTING_KEYS.USER_AUTO_SYNC, true),
+      getAutoSync: () => get().getSetting(SETTING_KEYS.USER_AUTO_SYNC, true) as boolean,
       setAutoSync: (enabled: boolean) => get().setSetting(SETTING_KEYS.USER_AUTO_SYNC, enabled),
       
-      getSyncInterval: () => get().getSetting(SETTING_KEYS.USER_SYNC_INTERVAL, 5000),
+      getSyncInterval: () => get().getSetting(SETTING_KEYS.USER_SYNC_INTERVAL, 5000) as number,
       setSyncInterval: (interval: number) => get().setSetting(SETTING_KEYS.USER_SYNC_INTERVAL, interval),
     }),
     {

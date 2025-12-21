@@ -27,20 +27,38 @@ func main() {
 		gin.SetMode(gin.DebugMode)
 	}
 
-    r := gin.Default()
-    r.SetTrustedProxies([]string{"0.0.0.0/0", "::/0"})
+	r := gin.Default()
+	r.SetTrustedProxies([]string{"0.0.0.0/0", "::/0"})
 
-    config := cors.DefaultConfig()
-    if os.Getenv("CORS_ALLOW_ALL") == "true" {
-        config.AllowAllOrigins = true
-    } else {
-        config.AllowOrigins = []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:3010", "http://localhost:5173"}
-    }
-    config.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
-    config.AllowHeaders = []string{"Origin", "Content-Type", "content-type", "Accept", "Authorization", "X-Requested-With", "X-CSRF-Token", "Sec-Fetch-Mode", "Sec-Fetch-Site", "Sec-Fetch-Dest"}
-    config.ExposeHeaders = []string{"Content-Length"}
-    config.AllowCredentials = true
-    r.Use(cors.New(config))
+	config := cors.DefaultConfig()
+	config.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+	config.AllowHeaders = []string{
+		"Origin",
+		"Content-Type",
+		"content-type",
+		"Accept",
+		"Authorization",
+		"X-Requested-With",
+		"X-CSRF-Token",
+		"Sec-Fetch-Mode",
+		"Sec-Fetch-Site",
+		"Sec-Fetch-Dest",
+	}
+	config.ExposeHeaders = []string{"Content-Length"}
+	config.AllowCredentials = true
+	if os.Getenv("CORS_ALLOW_ALL") == "true" {
+		config.AllowOriginFunc = func(origin string) bool {
+			return true
+		}
+	} else {
+		config.AllowOrigins = []string{
+			"http://localhost:3000",
+			"http://localhost:3001",
+			"http://localhost:3010",
+			"http://localhost:5173",
+		}
+	}
+	r.Use(cors.New(config))
 
 	// 设置路由
 	routes.SetupRoutes(r)

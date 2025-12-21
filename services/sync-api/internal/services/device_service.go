@@ -46,7 +46,7 @@ func (s *DeviceService) RegisterDevice(userID uint, req *models.RegisterDeviceRe
 		existingDevice.OSVersion = req.OSVersion
 		now := time.Now()
 		existingDevice.LastSeen = &now
-		existingDevice.LastIP = enhancedIPInfo.GetBestIP()  // 保留兼容性
+		existingDevice.LastIP = enhancedIPInfo.GetBestIP() // 保留兼容性
 		existingDevice.PublicIP = enhancedIPInfo.PublicIP
 		existingDevice.PrivateIP = enhancedIPInfo.PrivateIP
 		existingDevice.IsOnline = true
@@ -60,9 +60,41 @@ func (s *DeviceService) RegisterDevice(userID uint, req *models.RegisterDeviceRe
 		return nil, fmt.Errorf("failed to check existing device: %w", err)
 	}
 
+	var anyDevice models.Device
+	if err := s.db.Unscoped().Where("user_id = ? AND device_id = ?", userID, deviceID).First(&anyDevice).Error; err == nil {
+		now := time.Now()
+		updates := map[string]interface{}{
+			"user_id":      userID,
+			"name":         req.Name,
+			"platform":     req.Platform,
+			"version":      req.Version,
+			"model":        req.Model,
+			"os_version":   req.OSVersion,
+			"last_seen":    &now,
+			"last_ip":      enhancedIPInfo.GetBestIP(),
+			"public_ip":    enhancedIPInfo.PublicIP,
+			"private_ip":   enhancedIPInfo.PrivateIP,
+			"is_online":    true,
+			"status":       models.DeviceStatusActive,
+			"capabilities": req.Capabilities,
+			"deleted_at":   nil,
+			"updated_at":   now,
+		}
+
+		if err := s.db.Unscoped().Model(&models.Device{}).Where("id = ?", anyDevice.ID).Updates(updates).Error; err != nil {
+			return nil, fmt.Errorf("failed to update device: %w", err)
+		}
+		if err := s.db.Where("user_id = ? AND device_id = ?", userID, deviceID).First(&existingDevice).Error; err != nil {
+			return nil, fmt.Errorf("failed to load device: %w", err)
+		}
+		return &existingDevice, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("failed to check existing device (including deleted): %w", err)
+	}
+
 	// 创建新设备
 	now := time.Now()
-	
+
 	device := models.Device{
 		UserID:       userID,
 		DeviceID:     deviceID,
@@ -72,7 +104,7 @@ func (s *DeviceService) RegisterDevice(userID uint, req *models.RegisterDeviceRe
 		Model:        req.Model,
 		OSVersion:    req.OSVersion,
 		LastSeen:     &now,
-		LastIP:       enhancedIPInfo.GetBestIP(),  // 保留兼容性
+		LastIP:       enhancedIPInfo.GetBestIP(), // 保留兼容性
 		PublicIP:     enhancedIPInfo.PublicIP,
 		PrivateIP:    enhancedIPInfo.PrivateIP,
 		IsOnline:     true,

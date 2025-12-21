@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react'
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { useNoteFilesStore } from '@/store/noteFiles'
 import { useSettingsStore, SETTING_KEYS } from '@/store/settings'
 import apiClient from '@/lib/api'
@@ -18,6 +18,42 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
 import { SearchQuery, setSearchQuery, findNext, findPrevious, highlightSelectionMatches } from '@codemirror/search'
 
+const sepOf = (p: string) => (p.includes('\\') ? '\\' : '/')
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const joinPath = (a: string, b: string) => {
+  if (!a) return b
+  const sep = sepOf(a)
+  const esc = escapeRe(sep)
+  return a.replace(new RegExp(`${esc}$`), '') + sep + b
+}
+const parentPath = (p: string) => {
+  if (!p) return ''
+  const sep = sepOf(p)
+  const parts = p.split(sep)
+  parts.pop()
+  return parts.join(sep)
+}
+const relativeDir = (root: string, dir: string) => {
+  if (!root || !dir) return ''
+  const toUnix = (p: string) => p.replace(/\\/g, '/')
+  const rootUnix = toUnix(root).replace(/\/+/g, '/').replace(/\/$/, '')
+  const dirUnix = toUnix(dir).replace(/\/+/g, '/').replace(/\/$/, '')
+  const isWin = root.includes('\\') || root.includes(':') || dir.includes('\\') || dir.includes(':')
+  const rootCmp = isWin ? rootUnix.toLowerCase() : rootUnix
+  const dirCmp = isWin ? dirUnix.toLowerCase() : dirUnix
+  if (dirCmp === rootCmp) return ''
+  if (!dirCmp.startsWith(rootCmp + '/')) return ''
+  return dirUnix.slice(rootUnix.length + 1)
+}
+const blobToDataUrl = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error('read-error'))
+    reader.readAsDataURL(blob)
+  })
+}
+
 export default function NotebookTab() {
   const tree = useNoteFilesStore(s => s.tree)
   const isLoading = useNoteFilesStore(s => s.isLoading)
@@ -35,6 +71,7 @@ export default function NotebookTab() {
   const [currentDir, setCurrentDir] = useState('')
   const [currentFile, setCurrentFile] = useState('')
   const [content, setContent] = useState('')
+  const contentRef = useRef(content)
   const [saving, setSaving] = useState(false)
   const [preview, setPreview] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
@@ -49,10 +86,10 @@ export default function NotebookTab() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [childrenMap, setChildrenMap] = useState<Record<string, { entries: { name: string; path: string; isDirectory: boolean; isFile: boolean }[] }>>({})
 
-  const syncEnabledSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false))
-  const autoOnRefreshSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_REFRESH, true))
-  const autoNotesSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, true))
-  const autoAttSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, false))
+  const syncEnabledSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean)
+  const autoOnRefreshSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_REFRESH, true) as boolean)
+  const autoNotesSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, true) as boolean)
+  const autoAttSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, false) as boolean)
   const resizingRef = useRef(false)
   const startXRef = useRef(0)
   const startWRef = useRef(288)
@@ -60,6 +97,10 @@ export default function NotebookTab() {
   const mdRef = useRef<MarkdownIt | null>(null)
   const editorHostRef = useRef<HTMLDivElement | null>(null)
   const editorViewRef = useRef<EditorView | null>(null)
+
+  useEffect(() => {
+    contentRef.current = content
+  }, [content])
 
   useEffect(() => {
     const d = getDefaultDir()
@@ -74,20 +115,58 @@ export default function NotebookTab() {
 
   useEffect(() => {
     try {
-      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
-      const autoNotes = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, true)
-      const autoAtt = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, false)
-      const root = getDefaultDir()
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
+      const autoNotes = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, true) as boolean
+      const autoAtt = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, false) as boolean
+      const root = useNoteFilesStore.getState().getDefaultDir()
       if (enabled && root) {
-        if (autoNotes) useNoteFilesStore.getState().syncAllNotes(root).catch(() => {})
-        if (autoAtt) useNoteFilesStore.getState().syncAllAttachments(root).catch(() => {})
+        ;(async () => {
+          const { downloaded, updated, conflicted, failed } = await useNoteFilesStore.getState().pullNoteChanges(root)
+          if (downloaded > 0 || updated > 0 || conflicted > 0) {
+            useNoteFilesStore.getState().listDir(root)
+            const msg = [
+              downloaded > 0 ? `下载 ${downloaded}` : '',
+              updated > 0 ? `更新 ${updated}` : '',
+              conflicted > 0 ? `冲突 ${conflicted}` : '',
+              failed > 0 ? `失败 ${failed}` : '',
+            ].filter(Boolean).join('，')
+            useToastStore.getState().showSuccess('已从云端同步', msg || '无变更')
+          } else if (failed > 0) {
+            useToastStore.getState().showError('云端同步失败', `失败 ${failed} 个笔记`)
+          }
+        })().catch(() => { void 0 })
+        if (autoNotes) useNoteFilesStore.getState().syncAllNotes(root).catch(() => { void 0 })
+        if (autoAtt) useNoteFilesStore.getState().syncAllAttachments(root).catch(() => { void 0 })
       }
-    } catch {}
+    } catch { void 0 }
   }, [])
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null
+    const tick = async () => {
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
+      if (!enabled) return
+      const root = useNoteFilesStore.getState().getDefaultDir()
+      if (!root) return
+      const { downloaded, updated } = await useNoteFilesStore.getState().pullNoteChanges(root)
+      if (downloaded > 0 || updated > 0) {
+        useNoteFilesStore.getState().listDir(root)
+      }
+    }
+    if (syncEnabledSetting) {
+      timer = setInterval(() => { tick().catch(() => { void 0 }) }, 15000)
+    }
+    const onFocus = () => { tick().catch(() => { void 0 }) }
+    window.addEventListener('focus', onFocus)
+    return () => {
+      if (timer) clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [syncEnabledSetting])
 
   const manualSyncNotes = async () => {
     try {
-      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
       if (!enabled) { useToastStore.getState().showError('未开启云同步', '请在设置中开启'); return }
       const root = getDefaultDir()
       const { pushed, failed } = await useNoteFilesStore.getState().syncAllNotes(root)
@@ -98,12 +177,12 @@ export default function NotebookTab() {
       } else {
         useToastStore.getState().showSuccess('无变更', '没有需要同步的笔记')
       }
-    } catch {}
+    } catch { void 0 }
   }
 
   const manualSyncAttachments = async () => {
     try {
-      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
       if (!enabled) { useToastStore.getState().showError('未开启云同步', '请在设置中开启'); return }
       const root = getDefaultDir()
       const { uploaded, failed } = await useNoteFilesStore.getState().syncAllAttachments(root)
@@ -114,13 +193,13 @@ export default function NotebookTab() {
       } else {
         useToastStore.getState().showSuccess('无变更', '没有需要同步的附件')
       }
-    } catch {}
+    } catch { void 0 }
   }
 
   const uploadCurrentFile = async () => {
     try {
       if (!currentFile) { useToastStore.getState().showError('上传失败', '未选择文件'); return }
-      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
       if (!enabled) { useToastStore.getState().showError('未开启云同步', '请在设置中开启'); return }
       const root = getDefaultDir()
       const ok = await useNoteFilesStore.getState().syncNoteFile(currentFile, root)
@@ -130,13 +209,13 @@ export default function NotebookTab() {
       } else {
         useToastStore.getState().showError('上传失败', '网络或权限错误')
       }
-    } catch {}
+    } catch { void 0 }
   }
 
   const downloadCurrentFile = async () => {
     try {
       if (!currentFile) { useToastStore.getState().showError('下载失败', '未选择文件'); return }
-      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
       if (!enabled) { useToastStore.getState().showError('未开启云同步', '请在设置中开启'); return }
       const root = getDefaultDir()
       const dir = parentPath(currentFile)
@@ -157,40 +236,6 @@ export default function NotebookTab() {
     } catch (e) {
       useToastStore.getState().showError('下载失败', e instanceof Error ? e.message : '未知错误')
     }
-  }
-
-  const sepOf = (p: string) => (p.includes('\\') ? '\\' : '/')
-  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const joinPath = (a: string, b: string) => {
-    if (!a) return b
-    const sep = sepOf(a)
-    const esc = escapeRe(sep)
-    return a.replace(new RegExp(`${esc}$`), '') + sep + b
-  }
-  const parentPath = (p: string) => {
-    if (!p) return ''
-    const sep = sepOf(p)
-    const parts = p.split(sep)
-    parts.pop()
-    return parts.join(sep)
-  }
-
-  const relativeDir = (root: string, dir: string) => {
-    if (!root || !dir) return ''
-    const rs = sepOf(root)
-    const ds = sepOf(dir)
-    const norm = (p: string, s: string) => {
-      const esc = escapeRe(s)
-      return p.replace(new RegExp(`${esc}+`, 'g'), s).replace(new RegExp(`${esc}$`), '')
-    }
-    const R = norm(root, rs)
-    const D = norm(dir, ds)
-    if (D.startsWith(R)) {
-      const rel = D.slice(R.length)
-      const esc = escapeRe(ds)
-      return rel.replace(new RegExp(`^${esc}`), '')
-    }
-    return ''
   }
 
   const chooseDir = async () => {
@@ -267,13 +312,11 @@ export default function NotebookTab() {
     if (ok) {
       useToastStore.getState().showSuccess('已保存', '内容已写入文件')
       try {
-        const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
+        const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
         if (enabled && currentFile) {
           const root = getDefaultDir()
-          const dir = parentPath(currentFile)
-          const noteDir = relativeDir(root, dir)
+          await useNoteFilesStore.getState().syncNoteFile(currentFile, root)
           const fileName = currentFile.split(sepOf(currentFile)).pop() || 'note.md'
-          await apiClient.pushNotebookNote(content, { filename: fileName, noteDir, useData: true })
           useToastStore.getState().showSuccess('已同步到云端', `${fileName}`)
         }
       } catch (e) {
@@ -287,12 +330,26 @@ export default function NotebookTab() {
   const refresh = () => {
     if (currentDir) listDir(currentDir)
     try {
-      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
-      const autoOnRefresh = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_REFRESH, true)
-      const autoNotes = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, true)
-      const autoAtt = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, false)
+      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
+      const autoOnRefresh = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_REFRESH, true) as boolean
+      const autoNotes = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, true) as boolean
+      const autoAtt = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, false) as boolean
       if (enabled && autoOnRefresh) {
         const root = getDefaultDir()
+        useNoteFilesStore.getState().pullNoteChanges(root).then(({ downloaded, updated, conflicted, failed }) => {
+          if (downloaded > 0 || updated > 0 || conflicted > 0) {
+            listDir(root)
+            const msg = [
+              downloaded > 0 ? `下载 ${downloaded}` : '',
+              updated > 0 ? `更新 ${updated}` : '',
+              conflicted > 0 ? `冲突 ${conflicted}` : '',
+              failed > 0 ? `失败 ${failed}` : '',
+            ].filter(Boolean).join('，')
+            useToastStore.getState().showSuccess('已从云端同步', msg || '无变更')
+          } else if (failed > 0) {
+            useToastStore.getState().showError('云端同步失败', `失败 ${failed} 个笔记`)
+          }
+        }).catch(() => { void 0 })
         if (autoNotes) {
           useNoteFilesStore.getState().syncAllNotes(root).then(({ pushed, failed }) => {
             if (pushed > 0) {
@@ -300,7 +357,7 @@ export default function NotebookTab() {
             } else if (failed > 0) {
               useToastStore.getState().showError('同步失败', `失败 ${failed} 个笔记`)
             }
-          }).catch(() => {})
+          }).catch(() => { void 0 })
         }
         if (autoAtt) {
           useNoteFilesStore.getState().syncAllAttachments(root).then(({ uploaded, failed }) => {
@@ -309,10 +366,10 @@ export default function NotebookTab() {
             } else if (failed > 0) {
               useToastStore.getState().showError('附件同步失败', `失败 ${failed} 个附件`)
             }
-          }).catch(() => {})
+          }).catch(() => { void 0 })
         }
       }
-    } catch {}
+    } catch { void 0 }
   }
 
   const goParent = () => {
@@ -381,7 +438,7 @@ export default function NotebookTab() {
     )
   }
 
-  const safeHref = (href: string) => {
+  const safeHref = useCallback((href: string) => {
     try {
       if (href.startsWith('#') || href.startsWith('mailto:')) return href
       const u = new URL(href, 'http://localhost')
@@ -391,9 +448,9 @@ export default function NotebookTab() {
     } catch {
       return '#'
     }
-  }
+  }, [])
 
-  const safeSrc = (src: string) => {
+  const safeSrc = useCallback((src: string) => {
     try {
       if (src.startsWith('attachments/') || src.startsWith('./') || src.startsWith('../')) return src
       const u = new URL(src, 'http://localhost')
@@ -403,7 +460,7 @@ export default function NotebookTab() {
     } catch {
       return ''
     }
-  }
+  }, [])
 
   const stamp = () => {
     const d = new Date()
@@ -455,21 +512,13 @@ export default function NotebookTab() {
     }
   }
 
-  const blobToDataUrl = (blob: Blob): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result))
-      reader.onerror = () => reject(new Error('read-error'))
-      reader.readAsDataURL(blob)
-    })
-  }
-
-  const extractImageBlobs = (e: any): Blob[] => {
+  const extractImageBlobs = useCallback((e: { clipboardData?: DataTransfer | null } | null | undefined): Blob[] => {
     try {
-      const dt: any = (e && (e as any).clipboardData) || (e && e.clipboardData)
+      const dt = e?.clipboardData
       if (!dt) return []
-      const items = dt.items || []
+      const items = dt.items
       const blobs: Blob[] = []
+      if (!items) return blobs
       for (let i = 0; i < items.length; i++) {
         const it = items[i]
         if (it && typeof it.type === 'string' && it.type.startsWith('image/')) {
@@ -481,15 +530,15 @@ export default function NotebookTab() {
     } catch {
       return []
     }
-  }
+  }, [])
 
-  const handlePastedBlobs = async (blobs: Blob[], view?: EditorView) => {
+  const handlePastedBlobs = useCallback(async (blobs: Blob[], view?: EditorView) => {
     try {
       if (blobs.length === 0) return
       const baseDir = currentFile ? parentPath(currentFile) : (currentDir || getDefaultDir())
       if (!baseDir) return
       let inserted = 0
-      const inElectron = !!(window as any).electronAPI
+      const inElectron = !!window.electronAPI
       for (const blob of blobs) {
         const dataUrl = await blobToDataUrl(blob)
         if (inElectron) {
@@ -516,7 +565,10 @@ export default function NotebookTab() {
             const syncEnabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false)
             if (syncEnabled) {
               const abs = joinPath(baseDir, rel)
-              const read = await window.electronAPI.readBytesFile(abs)
+              const read =
+                window.electronAPI && typeof window.electronAPI.readBytesFile === 'function'
+                  ? await window.electronAPI.readBytesFile(abs)
+                  : null
               if (read && read.success && read.data) {
                 const fileName = rel.split('/').pop() || `image-${Date.now()}.png`
                 const noteRoot = getDefaultDir()
@@ -555,16 +607,28 @@ export default function NotebookTab() {
     } catch (err) {
       useToastStore.getState().showError('粘贴失败', err instanceof Error ? err.message : '未知错误')
     }
-  }
+  }, [
+    appendToFile,
+    currentDir,
+    currentFile,
+    getDefaultDir,
+    listDir,
+    saveImageToAttachments,
+  ])
 
-  const handlePaste = async (e: any) => {
+  const handlePaste = useCallback(async (e: ClipboardEvent) => {
     const blobs = extractImageBlobs(e)
     if (blobs.length === 0) return
     e.preventDefault()
     await handlePastedBlobs(blobs)
-  }
+  }, [extractImageBlobs, handlePastedBlobs])
 
-  const createMd = () => {
+  const handlePastedBlobsRef = useRef(handlePastedBlobs)
+  useEffect(() => {
+    handlePastedBlobsRef.current = handlePastedBlobs
+  }, [handlePastedBlobs])
+
+  const createMd = useCallback(() => {
     const md = new MarkdownIt({
       html: false,
       linkify: true,
@@ -598,36 +662,31 @@ export default function NotebookTab() {
       return self.renderToken(tokens, idx, options)
     }
     return md
-  }
+  }, [safeHref, safeSrc])
 
-  // 解析相对路径为绝对路径：严格按照“相对于当前md文件所在目录”的规则
-  const resolveRelAbs = (rel: string, baseDir: string) => {
-    let r = rel
-    try { r = decodeURIComponent(rel) } catch {}
-    return joinPath(baseDir, r)
-  }
-
-  const debugLog = (...args: unknown[]) => {
+  const debugLog = useCallback((...args: unknown[]) => {
     try {
       const s = args.map(a => {
         try { return typeof a === 'string' ? a : JSON.stringify(a) } catch { return String(a) }
       }).join(' ')
       console.log('[NotebookPreview]', ...args)
-      if ((window as any).electronAPI && typeof (window as any).electronAPI.log === 'function') {
-        (window as any).electronAPI.log('[NotebookPreview] ' + s)
+      if (window.electronAPI && typeof window.electronAPI.log === 'function') {
+        window.electronAPI.log('[NotebookPreview] ' + s)
       }
-    } catch {}
-  }
+    } catch { void 0 }
+  }, [])
 
   useEffect(() => {
     mdRef.current = createMd()
-  }, [currentDir, currentFile])
+  }, [createMd])
 
   useEffect(() => {
-    const inElectron = !!(window as any).electronAPI
+    const inElectron = !!window.electronAPI
     if (!inElectron) return
     if (!preview || !previewRef.current) return
-    const baseDir = currentFile ? parentPath(currentFile) : (currentDir || getDefaultDir())
+    const baseDir = currentFile
+      ? currentFile.replace(/[\\/][^\\/]*$/, '')
+      : (currentDir || useNoteFilesStore.getState().getDefaultDir())
     if (!baseDir) return
     const imgs = Array.from(previewRef.current.querySelectorAll('img[data-xpaste-local="true"]')) as HTMLImageElement[]
     debugLog('preview-load-start', { count: imgs.length, baseDir })
@@ -639,14 +698,21 @@ export default function NotebookTab() {
       if (lower.endsWith('.gif')) return 'image/gif'
       return 'image/png'
     }
-    const toUint8 = (d: any): Uint8Array | null => {
+    const toUint8 = (d: unknown): Uint8Array | null => {
       try {
         if (!d) return null
         if (d instanceof Uint8Array) return d
-        if (Array.isArray(d)) return new Uint8Array(d)
-        if (typeof d === 'object' && d.type === 'Buffer' && Array.isArray(d.data)) return new Uint8Array(d.data)
-        if (typeof d === 'object' && typeof d.byteLength === 'number' && d.buffer) return new Uint8Array(d as ArrayBuffer)
-      } catch {}
+        if (Array.isArray(d) && d.every((n) => typeof n === 'number')) return new Uint8Array(d)
+        if (typeof d === 'object') {
+          const obj = d as Record<string, unknown>
+          if (obj.type === 'Buffer' && Array.isArray(obj.data) && obj.data.every((n) => typeof n === 'number')) {
+            return new Uint8Array(obj.data)
+          }
+          if (typeof obj.byteLength === 'number' && obj.buffer instanceof ArrayBuffer) {
+            return new Uint8Array(obj.buffer)
+          }
+        }
+      } catch { void 0 }
       return null
     }
 
@@ -654,7 +720,10 @@ export default function NotebookTab() {
       for (const img of imgs) {
         const rel = img.getAttribute('data-xpaste-src') || ''
         if (!rel) continue
-        const abs = resolveRelAbs(rel, baseDir)
+        let decoded = rel
+        try { decoded = decodeURIComponent(rel) } catch { void 0 }
+        const sep = baseDir.includes('\\') ? '\\' : '/'
+        const abs = baseDir.replace(/[\\/]$/, '') + sep + decoded
         let exists = true
         if (typeof window.electronAPI.existsPath === 'function') {
           try {
@@ -680,7 +749,7 @@ export default function NotebookTab() {
           })
           ok = true
           debugLog('image-loaded-file-url', { rel, abs })
-        } catch {}
+        } catch { void 0 }
 
         if (!ok && typeof window.electronAPI.readBytesFile === 'function') {
           try {
@@ -693,7 +762,7 @@ export default function NotebookTab() {
               ok = true
               debugLog('image-loaded-blob', { rel, abs, size: u8.byteLength })
             }
-          } catch {}
+          } catch { void 0 }
         }
 
         if (!ok && typeof window.electronAPI.readDataUrlFile === 'function') {
@@ -704,14 +773,14 @@ export default function NotebookTab() {
               ok = true
               debugLog('image-loaded-dataurl', { rel, abs, len: (res2.data || '').length })
             }
-          } catch {}
+          } catch { void 0 }
         }
 
         if (!ok) { img.alt = '图片加载失败'; debugLog('image-load-failed', { rel, abs }) }
       }
     }
     loadAll()
-  }, [preview, content, currentDir, currentFile])
+  }, [preview, content, currentDir, currentFile, debugLog])
 
   useEffect(() => {
     if (!preview) return
@@ -719,7 +788,7 @@ export default function NotebookTab() {
     return () => {
       window.removeEventListener('paste', handlePaste)
     }
-  }, [preview, currentDir, currentFile])
+  }, [preview, handlePaste])
 
   const mdStyle = useMemo(() => {
     return HighlightStyle.define([
@@ -745,7 +814,7 @@ export default function NotebookTab() {
             const blobs = extractImageBlobs(event)
             if (blobs.length === 0) return false
             event.preventDefault()
-            handlePastedBlobs(blobs, view)
+            handlePastedBlobsRef.current(blobs, view)
             return true
           },
         }),
@@ -765,7 +834,7 @@ export default function NotebookTab() {
       const themed = theme === 'dark' ? [oneDark, ...extensions] : extensions
       const view = new EditorView({
         state: EditorState.create({
-          doc: content,
+          doc: contentRef.current,
           extensions: themed,
         }),
         parent: editorHostRef.current,
@@ -776,7 +845,7 @@ export default function NotebookTab() {
         editorViewRef.current = null
       }
     }
-  }, [preview, theme])
+  }, [preview, theme, mdStyle, extractImageBlobs])
 
   useEffect(() => {
     if (!preview && editorViewRef.current) {
@@ -796,7 +865,7 @@ export default function NotebookTab() {
     else findPrevious(view)
   }
 
-  const clearPreviewSearch = () => {
+  const clearPreviewSearch = useCallback(() => {
     if (!previewRef.current) return
     const container = previewRef.current
     const marks = container.querySelectorAll('mark.preview-match')
@@ -809,9 +878,9 @@ export default function NotebookTab() {
     })
     setPreviewMatchIndex(0)
     setPreviewMatchCount(0)
-  }
+  }, [])
 
-  const applyPreviewSearch = () => {
+  const applyPreviewSearch = useCallback(() => {
     if (!previewRef.current) return
     clearPreviewSearch()
     if (!searchQuery) return
@@ -856,7 +925,7 @@ export default function NotebookTab() {
         first.scrollIntoView({ block: 'center' })
       }
     }
-  }
+  }, [clearPreviewSearch, searchQuery])
 
   const gotoPreviewMatch = (dir: 'next' | 'prev') => {
     if (!previewRef.current || previewMatchCount === 0) return
@@ -915,7 +984,7 @@ export default function NotebookTab() {
 
   useEffect(() => {
     if (preview && searchQuery) applyPreviewSearch()
-  }, [preview, searchQuery, content])
+  }, [preview, content, applyPreviewSearch, searchQuery])
 
   const defaultFilePath = getDefaultFile()
 

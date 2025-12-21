@@ -1,5 +1,5 @@
 import React from 'react';
-import Toast, { ToastMessage } from './Toast';
+import Toast from './Toast';
 import { useToastStore } from '../store/toast';
 
 const ToastContainer: React.FC = () => {

@@ -1,17 +1,18 @@
 package handlers
 
 import (
-    "fmt"
-    "net/http"
-    "strconv"
-    "strings"
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
 
-    "github.com/gin-gonic/gin"
-    "gorm.io/gorm"
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
-    "xpaste-sync/internal/models"
-    "xpaste-sync/internal/services"
-    "xpaste-sync/internal/utils"
+	"xpaste-sync/internal/models"
+	"xpaste-sync/internal/services"
+	"xpaste-sync/internal/utils"
 )
 
 // DeviceHandler 设备处理器
@@ -64,16 +65,20 @@ func (h *DeviceHandler) RegisterDevice(c *gin.Context) {
 	// 获取客户端IP信息
 	ipInfo := utils.GetClientIPInfo(c)
 
-    // 注册设备
-    device, err := h.deviceService.RegisterDevice(userID.(uint), &req, ipInfo)
-    if err != nil {
-        if strings.Contains(err.Error(), "UNIQUE constraint failed: devices.device_id") {
-            c.JSON(http.StatusConflict, models.ErrorResponse("Device ID already exists"))
-            return
-        }
-        c.JSON(http.StatusInternalServerError, models.ErrorResponseWithMessage("Failed to register device", err.Error()))
-        return
-    }
+	// 注册设备
+	device, err := h.deviceService.RegisterDevice(userID.(uint), &req, ipInfo)
+	if err != nil {
+		if errors.Is(err, models.ErrDeviceIDAlreadyExists) {
+			c.JSON(http.StatusConflict, models.ErrorResponse("Device ID already exists"))
+			return
+		}
+		if strings.Contains(err.Error(), "UNIQUE constraint failed: devices.device_id") {
+			c.JSON(http.StatusConflict, models.ErrorResponse("Device ID already exists"))
+			return
+		}
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseWithMessage("Failed to register device", err.Error()))
+		return
+	}
 
 	c.JSON(http.StatusCreated, models.SuccessResponseWithMessage("Device registered successfully", device.ToResponse()))
 }

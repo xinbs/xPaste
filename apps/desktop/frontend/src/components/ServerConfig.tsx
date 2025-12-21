@@ -59,7 +59,7 @@ export default function ServerConfig({ onConfigured, onCancel }: ServerConfigPro
     try {
       new URL(formData.baseUrl);
       new URL(formData.wsUrl);
-    } catch (error) {
+    } catch {
       showError('配置错误', '请输入有效的URL地址');
       return;
     }

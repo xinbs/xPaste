@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+const devServerUrl = process.env.DESKTOP_DEV_SERVER_URL || process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 // 关闭按钮行为：'minimize' | 'hide' | 'quit'
 let userCloseBehavior = 'minimize';
 // Token 存储模式：默认磁盘，可通过环境变量切换为内存
@@ -594,7 +595,8 @@ function createWindow() {
 
   // 加载应用
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
+    console.log('[main] devServerUrl:', devServerUrl);
+    mainWindow.loadURL(devServerUrl);
     // 开发模式下打开开发者工具
     mainWindow.webContents.openDevTools();
   } else {

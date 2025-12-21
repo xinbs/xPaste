@@ -28,15 +28,15 @@ export interface SettingMetadata {
   max_value?: number;
   min_length?: number;
   max_length?: number;
-  extra?: Record<string, any>;
+  extra?: Record<string, unknown>;
 }
 
 export interface SetSettingRequest {
-  value: any;
+  value: unknown;
 }
 
 export interface BatchSetSettingsRequest {
-  settings: Record<string, any>;
+  settings: Record<string, unknown>;
 }
 
 // 设置API类
@@ -66,13 +66,13 @@ export class SettingsApi {
   }
 
   // 设置用户设置
-  async setUserSetting(key: string, value: any): Promise<Setting> {
+  async setUserSetting(key: string, value: unknown): Promise<Setting> {
     const response = await apiClient.put<{ success: boolean; data: Setting }>(`/settings/user/${key}`, { value });
     return response.data;
   }
 
   // 批量设置用户设置
-  async batchSetUserSettings(settings: Record<string, any>): Promise<void> {
+  async batchSetUserSettings(settings: Record<string, unknown>): Promise<void> {
     await apiClient.put<{ success: boolean }>('/settings/user/batch', { settings });
   }
 
@@ -82,13 +82,13 @@ export class SettingsApi {
   }
 
   // 导出用户设置
-  async exportUserSettings(): Promise<Record<string, any>> {
-    const response = await apiClient.get<{ success: boolean; data: Record<string, any> }>('/settings/user/export');
+  async exportUserSettings(): Promise<Record<string, unknown>> {
+    const response = await apiClient.get<{ success: boolean; data: Record<string, unknown> }>('/settings/user/export');
     return response.data;
   }
 
   // 导入用户设置
-  async importUserSettings(settings: Record<string, any>): Promise<void> {
+  async importUserSettings(settings: Record<string, unknown>): Promise<void> {
     await apiClient.post<{ success: boolean }>('/settings/user/import', { settings });
   }
 
@@ -105,7 +105,7 @@ export class SettingsApi {
   }
 
   // 设置系统设置（需要管理员权限）
-  async setSystemSetting(key: string, value: any): Promise<Setting> {
+  async setSystemSetting(key: string, value: unknown): Promise<Setting> {
     const response = await apiClient.put<{ success: boolean; data: Setting }>(`/settings/system/${key}`, { value });
     return response.data;
   }

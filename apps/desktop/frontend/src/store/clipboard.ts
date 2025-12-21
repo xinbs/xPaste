@@ -3,12 +3,12 @@ import apiClient from '@/lib/api';
 import { useWebSocketStore } from './websocket';
 import { useToastStore } from './toast';
 
-interface ClipItem {
+export interface ClipItem {
   id: string;
   type: string;
   content?: string;
   file_path?: string;
-  metadata?: any;
+  metadata?: unknown;
   created_at: string;
   updated_at: string;
   device_id: string;
@@ -37,15 +37,15 @@ interface ClipboardState {
   stopMonitoring: () => void;
   clearError: () => void;
   uploadFile: (file: File) => Promise<boolean>;
-  broadcastClipboardChange: (data: any) => void;
-  handleRemoteClipboardUpdate: (data: any) => void;
+  broadcastClipboardChange: (data: unknown) => void;
+  handleRemoteClipboardUpdate: (data: unknown) => void;
 }
 
 // 剪贴板监控相关
 let monitoringInterval: NodeJS.Timeout | null = null;
 let lastClipboardContent = '';
 let lastClipboardImageHash = '';
-let clipboardIpcHandler: any = null;
+let clipboardIpcHandler: ((event: unknown, data: unknown) => void) | null = null;
 let lastClipboardFileHash = '';
 let lastFileAt = 0;
 const FILE_DUP_TTL_MS = 8000;
@@ -65,7 +65,7 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
     console.log('剪贴板Store: 开始获取第一页剪贴板历史...');
     
     try {
-      const response = await apiClient.getClipItems(
+      const response = await apiClient.getClipItems<ClipItem>(
         { page: 1, pageSize: get().pageSize },
         signal
       );
@@ -114,7 +114,7 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
 
     try {
       const controller = new AbortController();
-      const response = await apiClient.getClipItems(
+      const response = await apiClient.getClipItems<ClipItem>(
         { 
           page: nextPage, 
           pageSize: pageSize 
@@ -143,12 +143,13 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
   addItem: async (itemData) => {
     set({ error: null });
     try {
-      const response = await apiClient.createClipItem({
+      const baseMeta = (itemData.metadata && typeof itemData.metadata === 'object') ? (itemData.metadata as Record<string, unknown>) : {}
+      const response = await apiClient.createClipItem<ClipItem>({
         type: itemData.type,
         content: itemData.content,
         file_path: itemData.file_path,
         metadata: {
-          ...itemData.metadata,
+          ...baseMeta,
           timestamp: new Date().toISOString(),
         },
       });
@@ -203,7 +204,7 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
     try {
       await navigator.clipboard.writeText(content);
       return true;
-    } catch (error) {
+    } catch {
       set({ error: '复制到剪贴板失败' });
       useToastStore.getState().showError('复制失败', '无法复制到剪贴板');
       return false;
@@ -225,23 +226,28 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
       }
 
       // 定义新的监听处理函数
-      clipboardIpcHandler = (_event: any, data: any) => {
-        console.log('收到主进程剪贴板更新:', data.type);
+      clipboardIpcHandler = (_event: unknown, data: unknown) => {
+        const payload = (data && typeof data === 'object') ? (data as Record<string, unknown>) : {}
+        const payloadType = typeof payload.type === 'string' ? payload.type : ''
+        const payloadContent = typeof payload.content === 'string' ? payload.content : ''
+        const savedByMain = payload.savedByMain === true
+
+        console.log('收到主进程剪贴板更新:', payloadType);
         
         // 如果主进程已经保存了数据，我们只需要刷新列表
-        if (data.savedByMain) {
+        if (savedByMain) {
             if (window.electronAPI && window.electronAPI.log) {
               window.electronAPI.log('主进程已保存数据，前端仅刷新列表');
             }
             // 更新本地状态以避免重复添加
-            if (data.type === 'text') {
-                lastClipboardContent = data.content;
+            if (payloadType === 'text') {
+                lastClipboardContent = payloadContent;
                 lastClipboardImageHash = '';
-            } else if (data.type === 'image') {
-                lastClipboardImageHash = data.content;
+            } else if (payloadType === 'image') {
+                lastClipboardImageHash = payloadContent;
                 lastClipboardContent = '';
-            } else if (data.type === 'file') {
-                lastClipboardFileHash = data.content || '';
+            } else if (payloadType === 'file') {
+                lastClipboardFileHash = payloadContent || '';
                 lastClipboardContent = '';
                 lastClipboardImageHash = '';
             }
@@ -251,22 +257,22 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
         }
 
         if (window.electronAPI && window.electronAPI.log) {
-          window.electronAPI.log('收到剪贴板 IPC 消息', { type: data.type, contentLength: data.content?.length });
+          window.electronAPI.log('收到剪贴板 IPC 消息', { type: payloadType, contentLength: payloadContent.length });
         }
         
-        if (data.type === 'text') {
+        if (payloadType === 'text') {
           // 文本去重检查
-          if (data.content && data.content !== lastClipboardContent) {
-            lastClipboardContent = data.content;
+          if (payloadContent && payloadContent !== lastClipboardContent) {
+            lastClipboardContent = payloadContent;
             lastClipboardImageHash = ''; // 清除图片状态
             
             if (window.electronAPI && window.electronAPI.log) {
-              window.electronAPI.log('准备添加文本记录', { content: data.content.substring(0, 20) + '...' });
+              window.electronAPI.log('准备添加文本记录', { content: payloadContent.substring(0, 20) + '...' });
             }
 
             get().addItem({
               type: 'text',
-              content: data.content,
+              content: payloadContent,
               metadata: {
                 source: 'electron_monitor',
                 auto_detected: true,
@@ -286,10 +292,10 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
                window.electronAPI.log('文本内容重复，跳过');
              }
           }
-        } else if (data.type === 'image') {
+        } else if (payloadType === 'image') {
           // 图片去重检查 (data.content 是 DataURL)
-          if (data.content && data.content !== lastClipboardImageHash) {
-            lastClipboardImageHash = data.content;
+          if (payloadContent && payloadContent !== lastClipboardImageHash) {
+            lastClipboardImageHash = payloadContent;
             lastClipboardContent = ''; // 清除文本状态
             
             if (window.electronAPI && window.electronAPI.log) {
@@ -298,7 +304,7 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
             
             get().addItem({
               type: 'image',
-              content: data.content, // DataURL
+              content: payloadContent, // DataURL
               metadata: {
                 source: 'electron_monitor',
                 auto_detected: true,
@@ -315,9 +321,9 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
                console.error(err);
             });
           }
-        } else if (data.type === 'file') {
+        } else if (payloadType === 'file') {
           const now = Date.now();
-          const content = data.content || '';
+          const content = payloadContent || '';
           if (content && (content !== lastClipboardFileHash || now - lastFileAt > FILE_DUP_TTL_MS)) {
             lastClipboardFileHash = content;
             lastFileAt = now;
@@ -327,7 +333,7 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
             try {
               const parsed = JSON.parse(content);
               if (parsed && Array.isArray(parsed.paths)) paths = parsed.paths;
-            } catch {}
+            } catch { void 0 }
             get().addItem({
               type: 'file',
               content,
@@ -499,7 +505,7 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
   
 
 
-  broadcastClipboardChange: (data: any) => {
+  broadcastClipboardChange: (data: unknown) => {
     // 广播剪贴板变化到其他设备
     setTimeout(() => {
       try {
@@ -517,25 +523,52 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
     }, 0);
   },
 
-  handleRemoteClipboardUpdate: (data: any) => {
+  handleRemoteClipboardUpdate: (data: unknown) => {
     // 处理来自其他设备的剪贴板更新
-    if (data && data.content_type) {
+    if (!data || typeof data !== 'object') return
+    const payload = data as Record<string, unknown>
+    const typeFromPayload = typeof payload.type === 'string' ? payload.type : ''
+    const contentType = typeof payload.content_type === 'string' ? payload.content_type : ''
+    const resolvedType = typeFromPayload || contentType
+    if (!resolvedType) return
       const { items } = get();
+      const id = (typeof payload.id === 'string' || typeof payload.id === 'number') ? String(payload.id) : Date.now().toString()
+      const created_at = typeof payload.created_at === 'string' ? payload.created_at : new Date().toISOString()
+      const updated_at = typeof payload.updated_at === 'string' ? payload.updated_at : new Date().toISOString()
+      const device_id = (typeof payload.device_id === 'string' && payload.device_id) ? payload.device_id : 'remote'
       const newItem = {
-        ...data,
-        id: data.id || Date.now().toString(),
-        created_at: data.created_at || new Date().toISOString(),
-        updated_at: data.updated_at || new Date().toISOString(),
+        id,
+        type: resolvedType,
+        content: typeof payload.content === 'string' ? payload.content : undefined,
+        file_path: typeof payload.file_path === 'string' ? payload.file_path : undefined,
+        metadata: payload.metadata,
+        created_at,
+        updated_at,
+        device_id,
+        device_name: typeof payload.device_name === 'string' ? payload.device_name : undefined,
       };
       
       // 检查是否已存在相同的项目
       const existingIndex = items.findIndex(item => item.id === newItem.id);
       if (existingIndex === -1) {
         set({ items: [newItem, ...items] });
+        return
       }
-    }
+
+      const parseMs = (t: string) => {
+        const ms = Date.parse(t)
+        return Number.isFinite(ms) ? ms : 0
+      }
+      const localUpdated = parseMs(items[existingIndex].updated_at)
+      const incomingUpdated = parseMs(newItem.updated_at)
+      if (incomingUpdated > localUpdated) {
+        const nextItems = [...items]
+        nextItems.splice(existingIndex, 1)
+        nextItems.unshift(newItem)
+        set({ items: nextItems })
+      }
   },
- }));
+}));
 
 // 页面卸载时清理监控
 if (typeof window !== 'undefined') {

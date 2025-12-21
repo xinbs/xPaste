@@ -136,12 +136,12 @@ func (h *Handler) GetOnlineDevices(c *gin.Context) {
 // @Failure 401 {object} models.Response "未授权"
 // @Router /ws/stats [get]
 func (h *Handler) GetConnectionStats(c *gin.Context) {
-    // 这里应该检查管理员权限，暂时跳过
-    // TODO: 实现管理员权限检查
+	// 这里应该检查管理员权限，暂时跳过
+	// TODO: 实现管理员权限检查
 
-    stats := h.manager.GetStats()
+	stats := h.manager.GetStats()
 
-    c.JSON(http.StatusOK, models.SuccessResponse("Connection stats retrieved successfully", stats))
+	c.JSON(http.StatusOK, models.SuccessResponse("Connection stats retrieved successfully", stats))
 }
 
 // SendMessage 发送消息到指定设备
@@ -183,7 +183,7 @@ func (h *Handler) SendMessage(c *gin.Context) {
 	}
 
 	// 检查设备是否在线
-	if !h.manager.IsDeviceOnline(req.DeviceID) {
+	if !h.manager.IsDeviceOnline(userID.(uint), req.DeviceID) {
 		c.JSON(http.StatusNotFound, models.ErrorResponse("Device is not online"))
 		return
 	}
@@ -197,7 +197,7 @@ func (h *Handler) SendMessage(c *gin.Context) {
 	}
 
 	// 发送消息
-	h.manager.SendToDevice(req.DeviceID, message)
+	h.manager.SendToDevice(userID.(uint), req.DeviceID, message)
 
 	c.JSON(http.StatusOK, models.SuccessResponse("Message sent successfully", gin.H{
 		"message_id": message.MessageID,

@@ -116,7 +116,7 @@ func getCurrentMigrationVersion() (int, error) {
 func getCurrentCodeVersion() int {
 	// 这里定义当前代码的数据库版本
 	// 每次修改数据库结构时，需要增加这个版本号
-	return 1
+	return 3
 }
 
 // recordMigrationStatus 记录迁移状态
@@ -195,6 +195,9 @@ func autoMigrateModels() error {
 		&models.ClipItem{},
 		&models.OcrResult{},
 		&models.Setting{},
+		&models.NoteItem{},
+		&models.NoteEvent{},
+		&models.NoteDeviceCursor{},
 	}
 
 	for _, model := range models {
@@ -210,6 +213,10 @@ func autoMigrateModels() error {
 // createCustomIndexes 创建自定义索引
 func createCustomIndexes() error {
 	log.Println("Creating custom indexes...")
+
+	if err := DB.Exec("DROP INDEX IF EXISTS idx_devices_device_id").Error; err != nil {
+		log.Printf("Warning: failed to drop index idx_devices_device_id: %v", err)
+	}
 
 	indexes := []struct {
 		name  string
@@ -249,6 +256,7 @@ func createCustomIndexes() error {
 		{"idx_settings_category", "CREATE INDEX IF NOT EXISTS idx_settings_category ON settings(category)"},
 
 		// 复合索引
+		{"idx_devices_user_device_id", "CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_user_device_id ON devices(user_id, device_id)"},
 		{"idx_clip_items_user_status", "CREATE INDEX IF NOT EXISTS idx_clip_items_user_status ON clip_items(user_id, status)"},
 		{"idx_clip_items_user_type", "CREATE INDEX IF NOT EXISTS idx_clip_items_user_type ON clip_items(user_id, type)"},
 		{"idx_settings_user_key", "CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_user_key ON settings(user_id, key) WHERE user_id IS NOT NULL"},
