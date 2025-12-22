@@ -11,7 +11,7 @@ services:
       - "8080:8080"
     environment:
       - GIN_MODE=debug
-      - DB_TYPE=sqlite
+      - DB_DRIVER=sqlite
       - DB_DSN=/data/xpaste.db
       - LOG_LEVEL=debug
       - JWT_SECRET=${JWT_SECRET:-dev-secret-key}
