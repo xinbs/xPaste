@@ -9,12 +9,13 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: xpaste-sync-api
+    user: "1000:1000"
     ports:
       - "8080:8080"
     environment:
       - GIN_MODE=release
-      - DB_TYPE=sqlite
-      - DB_PATH=/data/xpaste.db
+      - DB_DRIVER=sqlite
+      - DB_DSN=/data/xpaste.db
       - LOG_LEVEL=info
       - JWT_SECRET=${JWT_SECRET:-your-jwt-secret-key}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
