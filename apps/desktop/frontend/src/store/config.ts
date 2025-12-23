@@ -22,6 +22,20 @@ const DEFAULT_CONFIG: ServerConfig = {
   wsUrl: 'ws://localhost:8080'
 };
 
+function stripTrailingSlashes(url: string) {
+  return String(url || '').replace(/\/+$/, '');
+}
+
+function normalizeBaseUrl(baseUrl: string) {
+  const u = stripTrailingSlashes(baseUrl);
+  return u.replace(/\/api\/v1$/i, '');
+}
+
+function normalizeWsUrl(wsUrl: string) {
+  const u = stripTrailingSlashes(wsUrl);
+  return u.replace(/\/ws$/i, '');
+}
+
 export const useConfigStore = create<ConfigState>()(
   persist(
     (set, get) => ({
@@ -29,8 +43,12 @@ export const useConfigStore = create<ConfigState>()(
       isConfigured: false,
       
       setServerConfig: (config: ServerConfig) => {
+        const normalized: ServerConfig = {
+          baseUrl: normalizeBaseUrl(config.baseUrl),
+          wsUrl: normalizeWsUrl(config.wsUrl),
+        };
         set({ 
-          serverConfig: config, 
+          serverConfig: normalized, 
           isConfigured: true 
         });
       },
@@ -44,12 +62,14 @@ export const useConfigStore = create<ConfigState>()(
       
       getApiUrl: () => {
         const { serverConfig } = get();
-        return `${serverConfig.baseUrl}/api/v1`;
+        const base = normalizeBaseUrl(serverConfig.baseUrl);
+        return `${base || DEFAULT_CONFIG.baseUrl}/api/v1`;
       },
       
       getWsUrl: () => {
         const { serverConfig } = get();
-        return serverConfig.wsUrl;
+        const ws = normalizeWsUrl(serverConfig.wsUrl);
+        return ws || DEFAULT_CONFIG.wsUrl;
       }
     }),
     {

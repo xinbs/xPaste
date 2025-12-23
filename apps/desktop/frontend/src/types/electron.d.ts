@@ -56,6 +56,7 @@ export interface ElectronAPI {
   saveBytesFile: (filePath: string, bytes: Uint8Array) => Promise<{ success: boolean; error?: string }>;
   readBytesFile: (filePath: string) => Promise<{ success: boolean; data?: Uint8Array; error?: string }>;
   readDataUrlFile: (filePath: string) => Promise<{ success: boolean; data?: string; error?: string }>;
+  statPath: (targetPath: string) => Promise<{ success: boolean; data?: { isFile: boolean; isDirectory: boolean; sizeBytes: number; mtimeMs: number; ctimeMs: number; atimeMs: number }; error?: string }>;
   existsPath: (targetPath: string) => Promise<{ success: boolean; data?: boolean; error?: string }>;
 }
 

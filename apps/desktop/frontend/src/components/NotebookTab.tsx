@@ -93,8 +93,17 @@ const fmtTime = (ms: number | undefined) => {
 }
 
 const bufToHex = (buf: ArrayBuffer) => Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('')
+const u8ToArrayBuffer = (u8: Uint8Array) => {
+  const b = u8.buffer
+  if (b instanceof ArrayBuffer) {
+    return b.slice(u8.byteOffset, u8.byteOffset + u8.byteLength)
+  }
+  const copy = new Uint8Array(u8.byteLength)
+  copy.set(u8)
+  return copy.buffer
+}
 const sha256Hex = async (bytes: Uint8Array) => {
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  const digest = await crypto.subtle.digest('SHA-256', u8ToArrayBuffer(bytes))
   return bufToHex(digest)
 }
 
@@ -117,6 +126,9 @@ export default function NotebookTab() {
   const [content, setContent] = useState('')
   const contentRef = useRef(content)
   const [saving, setSaving] = useState(false)
+  const [quickSyncing, setQuickSyncing] = useState(false)
+  const [quickSyncStatus, setQuickSyncStatus] = useState<{ state: 'idle' | 'syncing' | 'success' | 'nochange' | 'error'; atMs?: number; relPath?: string; message?: string }>({ state: 'idle' })
+  const retryQuickSyncRef = useRef<(() => void) | null>(null)
   const [preview, setPreview] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [searchQuery, setSearch] = useState('')
@@ -127,6 +139,7 @@ export default function NotebookTab() {
   const [newNoteName, setNewNoteName] = useState('')
   const [creating, setCreating] = useState(false)
   const [showSyncMenu, setShowSyncMenu] = useState(false)
+  const syncMenuRef = useRef<HTMLDivElement | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [childrenMap, setChildrenMap] = useState<Record<string, { entries: { name: string; path: string; isDirectory: boolean; isFile: boolean }[] }>>({})
   const [showCloudManager, setShowCloudManager] = useState(false)
@@ -134,6 +147,9 @@ export default function NotebookTab() {
   const [cloudPath, setCloudPath] = useState('')
   const [cloudLoading, setCloudLoading] = useState(false)
   const [cloudItems, setCloudItems] = useState<CloudTreeItem[]>([])
+  const [cloudQuery, setCloudQuery] = useState('')
+  const [cloudSortKey, setCloudSortKey] = useState<'name' | 'mtime' | 'size'>('name')
+  const [cloudSortDir, setCloudSortDir] = useState<'asc' | 'desc'>('asc')
   const [cloudTrash, setCloudTrash] = useState<CloudTrashItem[]>([])
   const [cloudSelectedPath, setCloudSelectedPath] = useState<string>('')
   const [cloudPreview, setCloudPreview] = useState<{ path: string; kind: 'text' | 'image' | 'binary'; text?: string; url?: string; sizeBytes?: number } | null>(null)
@@ -148,14 +164,38 @@ export default function NotebookTab() {
   const [syncConflict, setSyncConflict] = useState<null | {
     direction: 'upload' | 'download'
     path: string
-    local?: { sizeBytes: number; sha256?: string }
+    local?: { sizeBytes: number; mtimeMs?: number; sha256?: string }
     remote?: { sizeBytes?: number; mtimeMs?: number; sha256?: string }
   }>(null)
+  const [manualSyncMode, setManualSyncMode] = useState<'download' | 'upload'>('download')
+  const [manualSyncRightTab, setManualSyncRightTab] = useState<'plan' | 'logs'>('plan')
+  const [manualCloudFiles, setManualCloudFiles] = useState<{ path: string; sizeBytes?: number; mtimeMs?: number }[]>([])
+  const [manualLocalFiles, setManualLocalFiles] = useState<{ absPath: string; relPath: string }[]>([])
+  const [manualCloudSelected, setManualCloudSelected] = useState<Record<string, boolean>>({})
+  const [manualLocalSelected, setManualLocalSelected] = useState<Record<string, boolean>>({})
+  const [manualCloudQuery, setManualCloudQuery] = useState('')
+  const [manualLocalQuery, setManualLocalQuery] = useState('')
+  const [manualPlanning, setManualPlanning] = useState(false)
+  const [manualPlan, setManualPlan] = useState<{
+    mode: 'download' | 'upload'
+    createdAtMs: number
+    items: {
+      mode: 'download' | 'upload'
+      path: string
+      localAbsPath?: string
+      action: 'download' | 'upload' | 'skip' | 'conflict' | 'error'
+      local?: { sizeBytes: number; mtimeMs?: number; sha256?: string }
+      remote?: { sizeBytes?: number; mtimeMs?: number; sha256?: string }
+      message?: string
+    }[]
+    stats: { total: number; willDo: number; skipped: number; conflicted: number; errors: number }
+  } | null>(null)
 
   const syncEnabledSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean)
   const autoOnRefreshSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_REFRESH, true) as boolean)
   const autoNotesSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, true) as boolean)
   const autoAttSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, false) as boolean)
+  const autoSyncAllSetting = autoNotesSetting && autoAttSetting
   const resizingRef = useRef(false)
   const startXRef = useRef(0)
   const startWRef = useRef(288)
@@ -169,11 +209,32 @@ export default function NotebookTab() {
   }, [content])
 
   useEffect(() => {
+    setQuickSyncStatus({ state: 'idle' })
+  }, [currentFile])
+
+  useEffect(() => {
     const prev = cloudPreviewUrlRef.current
     const next = cloudPreview?.url || null
     if (prev && prev !== next) URL.revokeObjectURL(prev)
     cloudPreviewUrlRef.current = next
   }, [cloudPreview])
+
+  useEffect(() => {
+    if (!showSyncMenu) return
+    const handle = (e: Event) => {
+      const target = e.target as Node | null
+      if (!target) return
+      const el = syncMenuRef.current
+      if (!el) return
+      if (!el.contains(target)) setShowSyncMenu(false)
+    }
+    window.addEventListener('mousedown', handle, true)
+    window.addEventListener('touchstart', handle, true)
+    return () => {
+      window.removeEventListener('mousedown', handle, true)
+      window.removeEventListener('touchstart', handle, true)
+    }
+  }, [showSyncMenu])
 
   const appendSyncLog = useCallback((msg: string) => {
     const d = new Date()
@@ -190,12 +251,16 @@ export default function NotebookTab() {
   }, [])
 
   const listLocalFilesRecursive = useCallback(async (rootDir: string) => {
-    const excludedNames = new Set(['.xpaste-local-backups'])
+    const excludedNames = new Set(['.xpaste-local-backups', '.DS_Store', 'Thumbs.db', 'desktop.ini'])
+    const excludedDirNames = new Set(['.git', '.svn', '.hg'])
     const out: { absPath: string; relPath: string }[] = []
     const walk = async (dirAbs: string) => {
       const entries = await listDirRaw(dirAbs)
       for (const e of entries) {
-        if (e.name && excludedNames.has(e.name)) continue
+        const entryName = String(e.name || '')
+        if (entryName && excludedNames.has(entryName)) continue
+        if (entryName && excludedDirNames.has(entryName) && e.isDirectory) continue
+        if (entryName && entryName.startsWith('._')) continue
         if (e.isDirectory) {
           await walk(e.path)
           continue
@@ -306,10 +371,17 @@ export default function NotebookTab() {
           if (remoteHash && remoteHash !== localHash) {
             conflicted += 1
             setSyncStats((s) => ({ ...s, conflicted: s.conflicted + 1 }))
+            let localMtimeMs: number | undefined
+            try {
+              const st = await window.electronAPI.statPath?.(f.absPath)
+              if (st && st.success && st.data && typeof st.data.mtimeMs === 'number') {
+                localMtimeMs = st.data.mtimeMs
+              }
+            } catch { void 0 }
             const action = await askSyncConflict({
               direction: 'upload',
               path: f.relPath,
-              local: { sizeBytes: bytes.byteLength, sha256: localHash },
+              local: { sizeBytes: bytes.byteLength, mtimeMs: localMtimeMs, sha256: localHash },
               remote: remoteMeta,
             })
             setSyncConflict(null)
@@ -323,7 +395,7 @@ export default function NotebookTab() {
             }
           }
 
-          const blob = new Blob([bytes], { type: 'application/octet-stream' })
+          const blob = new Blob([u8ToArrayBuffer(bytes)], { type: 'application/octet-stream' })
           const res = await apiClient.uploadCloudFile(blob, { path: f.relPath, mode: remoteHash ? 'force' : 'safe', useData: true })
           if (res && res.success) {
             done += 1
@@ -404,10 +476,17 @@ export default function NotebookTab() {
               }
               conflicted += 1
               setSyncStats((s) => ({ ...s, conflicted: s.conflicted + 1 }))
+              let localMtimeMs: number | undefined
+              try {
+                const st = await window.electronAPI.statPath?.(abs)
+                if (st && st.success && st.data && typeof st.data.mtimeMs === 'number') {
+                  localMtimeMs = st.data.mtimeMs
+                }
+              } catch { void 0 }
               const action = await askSyncConflict({
                 direction: 'download',
                 path: relPath,
-                local: { sizeBytes: localBytes.byteLength, sha256: localHash },
+                local: { sizeBytes: localBytes.byteLength, mtimeMs: localMtimeMs, sha256: localHash },
                 remote: { sizeBytes: bytes.byteLength, mtimeMs: typeof dl.mtimeMs === 'number' ? dl.mtimeMs : undefined, sha256: remoteHash },
               })
               setSyncConflict(null)
@@ -447,6 +526,438 @@ export default function NotebookTab() {
       try { useNoteFilesStore.getState().listDir(root) } catch { void 0 }
     }
   }, [appendSyncLog, askSyncConflict, backupLocalFileIfExists, getDefaultDir])
+
+  const refreshManualCloudFiles = useCallback(async () => {
+    try {
+      const res = await apiClient.getCloudFilesTree({ path: '', recursive: true, useData: true })
+      const itemsRaw = (res && res.success && res.data && Array.isArray(res.data.items)) ? res.data.items : []
+      const files = itemsRaw
+        .filter((it) => it && !it.is_dir && typeof it.path === 'string' && it.path)
+        .map((it) => ({
+          path: String(it.path || '').replace(/^\/+/, ''),
+          sizeBytes: typeof it.size_bytes === 'number' ? it.size_bytes : undefined,
+          mtimeMs: typeof it.mtime_ms === 'number' ? it.mtime_ms : undefined,
+        }))
+        .sort((a, b) => a.path.localeCompare(b.path, 'zh-CN'))
+      setManualCloudFiles(files)
+    } catch (e) {
+      useToastStore.getState().showError('加载云端文件失败', e instanceof Error ? e.message : '未知错误')
+    }
+  }, [])
+
+  const refreshManualLocalFiles = useCallback(async () => {
+    try {
+      const root = getDefaultDir()
+      if (!root) {
+        setManualLocalFiles([])
+        return
+      }
+      const files = await listLocalFilesRecursive(root)
+      files.sort((a, b) => a.relPath.localeCompare(b.relPath, 'zh-CN'))
+      setManualLocalFiles(files)
+    } catch (e) {
+      useToastStore.getState().showError('加载本地文件失败', e instanceof Error ? e.message : '未知错误')
+    }
+  }, [getDefaultDir, listLocalFilesRecursive])
+
+  useEffect(() => {
+    if (!showManualSync) return
+    setManualSyncRightTab('plan')
+    setManualPlan(null)
+    setManualPlanning(false)
+    setManualCloudQuery('')
+    setManualLocalQuery('')
+    setManualCloudSelected({})
+    setManualLocalSelected({})
+    refreshManualCloudFiles().catch(() => { void 0 })
+    refreshManualLocalFiles().catch(() => { void 0 })
+  }, [showManualSync, refreshManualCloudFiles, refreshManualLocalFiles])
+
+  useEffect(() => {
+    if (syncRunning) setManualSyncRightTab('logs')
+  }, [syncRunning])
+
+  const buildManualSyncPlan = useCallback(async () => {
+    if (!window.electronAPI) {
+      useToastStore.getState().showError('不可用', '请在桌面应用模式下使用手动同步')
+      return
+    }
+    const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
+    if (!enabled) {
+      useToastStore.getState().showError('未开启云同步', '请在设置中开启')
+      return
+    }
+    const root = getDefaultDir()
+    if (!root) {
+      useToastStore.getState().showError('未设置目录', '请先选择记事本目录')
+      return
+    }
+
+    setManualPlanning(true)
+    try {
+      if (manualSyncMode === 'upload') {
+        const selected = manualLocalFiles.filter((f) => !!manualLocalSelected[f.relPath])
+        if (selected.length === 0) {
+          useToastStore.getState().showError('未选择文件', '请先选择要上传的本地文件')
+          return
+        }
+        const items: NonNullable<typeof manualPlan>['items'] = []
+        for (const f of selected) {
+          try {
+            const readRes = await window.electronAPI.readBytesFile(f.absPath)
+            if (!readRes?.success || !readRes.data) {
+              items.push({ mode: 'upload', path: f.relPath, localAbsPath: f.absPath, action: 'error', message: '读取失败' })
+              continue
+            }
+            const bytes = readRes.data
+            const localHash = await sha256Hex(bytes)
+            let localMtimeMs: number | undefined
+            try {
+              const st = await window.electronAPI.statPath?.(f.absPath)
+              if (st && st.success && st.data && typeof st.data.mtimeMs === 'number') localMtimeMs = st.data.mtimeMs
+            } catch { void 0 }
+
+            let remoteMeta: { sizeBytes?: number; mtimeMs?: number; sha256?: string } | undefined
+            let remoteHash = ''
+            try {
+              const m = await apiClient.getCloudFileMeta({ path: f.relPath, useData: true })
+              if (m && m.success && m.data) {
+                remoteHash = typeof m.data.sha256 === 'string' ? m.data.sha256 : ''
+                remoteMeta = {
+                  sizeBytes: typeof m.data.size_bytes === 'number' ? m.data.size_bytes : undefined,
+                  mtimeMs: typeof m.data.mtime_ms === 'number' ? m.data.mtime_ms : undefined,
+                  sha256: remoteHash || undefined,
+                }
+              }
+            } catch { void 0 }
+
+            if (remoteHash && remoteHash === localHash) {
+              items.push({
+                mode: 'upload',
+                path: f.relPath,
+                localAbsPath: f.absPath,
+                action: 'skip',
+                local: { sizeBytes: bytes.byteLength, mtimeMs: localMtimeMs, sha256: localHash },
+                remote: remoteMeta,
+              })
+              continue
+            }
+
+            if (remoteHash && remoteHash !== localHash) {
+              items.push({
+                mode: 'upload',
+                path: f.relPath,
+                localAbsPath: f.absPath,
+                action: 'conflict',
+                local: { sizeBytes: bytes.byteLength, mtimeMs: localMtimeMs, sha256: localHash },
+                remote: remoteMeta,
+              })
+              continue
+            }
+
+            items.push({
+              mode: 'upload',
+              path: f.relPath,
+              localAbsPath: f.absPath,
+              action: 'upload',
+              local: { sizeBytes: bytes.byteLength, mtimeMs: localMtimeMs, sha256: localHash },
+              remote: remoteMeta,
+            })
+          } catch (e) {
+            items.push({ mode: 'upload', path: f.relPath, localAbsPath: f.absPath, action: 'error', message: e instanceof Error ? e.message : '未知错误' })
+          }
+        }
+
+        const stats = {
+          total: items.length,
+          willDo: items.filter(x => x.action === 'upload' || x.action === 'conflict').length,
+          skipped: items.filter(x => x.action === 'skip').length,
+          conflicted: items.filter(x => x.action === 'conflict').length,
+          errors: items.filter(x => x.action === 'error').length,
+        }
+        setManualPlan({ mode: 'upload', createdAtMs: Date.now(), items, stats })
+        return
+      }
+
+      const selected = manualCloudFiles.filter((f) => !!manualCloudSelected[f.path])
+      if (selected.length === 0) {
+        useToastStore.getState().showError('未选择文件', '请先选择要下载的云端文件')
+        return
+      }
+      const items: NonNullable<typeof manualPlan>['items'] = []
+      for (const f of selected) {
+        const relPath = f.path
+        try {
+          const meta = await apiClient.getCloudFileMeta({ path: relPath, useData: true })
+          const remoteHash = (meta && meta.success && meta.data && typeof meta.data.sha256 === 'string') ? meta.data.sha256 : ''
+          const remoteMeta: { sizeBytes?: number; mtimeMs?: number; sha256?: string } | undefined = (meta && meta.success && meta.data) ? ({
+            sizeBytes: typeof meta.data.size_bytes === 'number' ? meta.data.size_bytes : undefined,
+            mtimeMs: typeof meta.data.mtime_ms === 'number' ? meta.data.mtime_ms : undefined,
+            sha256: remoteHash || undefined,
+          }) : undefined
+
+          const localAbs = joinPathUnix(root, relPath)
+          const existsRes = await window.electronAPI.existsPath(localAbs)
+          if (!existsRes?.success || !existsRes.data) {
+            items.push({ mode: 'download', path: relPath, localAbsPath: localAbs, action: 'download', remote: remoteMeta })
+            continue
+          }
+
+          const readRes = await window.electronAPI.readBytesFile(localAbs)
+          const localBytes = (readRes?.success && readRes.data) ? readRes.data : null
+          if (!localBytes) {
+            items.push({ mode: 'download', path: relPath, localAbsPath: localAbs, action: 'error', message: '读取本地失败', remote: remoteMeta })
+            continue
+          }
+          const localHash = await sha256Hex(localBytes)
+          let localMtimeMs: number | undefined
+          try {
+            const st = await window.electronAPI.statPath?.(localAbs)
+            if (st && st.success && st.data && typeof st.data.mtimeMs === 'number') localMtimeMs = st.data.mtimeMs
+          } catch { void 0 }
+
+          if (remoteHash && localHash === remoteHash) {
+            items.push({
+              mode: 'download',
+              path: relPath,
+              localAbsPath: localAbs,
+              action: 'skip',
+              local: { sizeBytes: localBytes.byteLength, mtimeMs: localMtimeMs, sha256: localHash },
+              remote: remoteMeta,
+            })
+            continue
+          }
+          items.push({
+            mode: 'download',
+            path: relPath,
+            localAbsPath: localAbs,
+            action: remoteHash ? 'conflict' : 'download',
+            local: { sizeBytes: localBytes.byteLength, mtimeMs: localMtimeMs, sha256: localHash },
+            remote: remoteMeta,
+          })
+        } catch (e) {
+          items.push({ mode: 'download', path: relPath, action: 'error', message: e instanceof Error ? e.message : '未知错误' })
+        }
+      }
+
+      const stats = {
+        total: items.length,
+        willDo: items.filter(x => x.action === 'download' || x.action === 'conflict').length,
+        skipped: items.filter(x => x.action === 'skip').length,
+        conflicted: items.filter(x => x.action === 'conflict').length,
+        errors: items.filter(x => x.action === 'error').length,
+      }
+      setManualPlan({ mode: 'download', createdAtMs: Date.now(), items, stats })
+    } finally {
+      setManualPlanning(false)
+    }
+  }, [getDefaultDir, manualCloudFiles, manualCloudSelected, manualLocalFiles, manualLocalSelected, manualSyncMode])
+
+  const runManualSyncPlan = useCallback(async () => {
+    if (!window.electronAPI) {
+      useToastStore.getState().showError('不可用', '请在桌面应用模式下使用手动同步')
+      return
+    }
+    if (!manualPlan || manualPlan.items.length === 0) {
+      useToastStore.getState().showError('没有计划', '请先生成同步计划')
+      return
+    }
+    const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
+    if (!enabled) {
+      useToastStore.getState().showError('未开启云同步', '请在设置中开启')
+      return
+    }
+    const root = getDefaultDir()
+    if (!root) {
+      useToastStore.getState().showError('未设置目录', '请先选择记事本目录')
+      return
+    }
+
+    setSyncRunning(true)
+    syncAbortRef.current = false
+    setSyncStats({ total: manualPlan.items.length, done: 0, skipped: 0, conflicted: 0, failed: 0 })
+    appendSyncLog(`开始执行计划：${manualPlan.mode === 'download' ? '云端 -> 本地' : '本地 -> 云端'}（${manualPlan.items.length} 项）`)
+
+    let done = 0
+    let skipped = 0
+    let conflicted = 0
+    let failed = 0
+
+    try {
+      for (const it of manualPlan.items) {
+        if (syncAbortRef.current) {
+          appendSyncLog('已停止')
+          break
+        }
+
+        if (it.action === 'skip') {
+          skipped += 1
+          done += 1
+          setSyncStats((s) => ({ ...s, skipped: s.skipped + 1, done: s.done + 1 }))
+          appendSyncLog(`跳过（无变更）：${it.path}`)
+          continue
+        }
+        if (it.action === 'error') {
+          failed += 1
+          done += 1
+          setSyncStats((s) => ({ ...s, failed: s.failed + 1, done: s.done + 1 }))
+          appendSyncLog(`失败：${it.path}${it.message ? `（${it.message}）` : ''}`)
+          continue
+        }
+
+        if (it.mode === 'upload') {
+          try {
+            const abs = it.localAbsPath || joinPathUnix(root, it.path)
+            const readRes = await window.electronAPI.readBytesFile(abs)
+            if (!readRes?.success || !readRes.data) {
+              failed += 1
+              done += 1
+              setSyncStats((s) => ({ ...s, failed: s.failed + 1, done: s.done + 1 }))
+              appendSyncLog(`读取失败：${it.path}`)
+              continue
+            }
+            const bytes = readRes.data
+            const localHash = await sha256Hex(bytes)
+            let remoteHash = ''
+            let remoteMeta: { sizeBytes?: number; mtimeMs?: number; sha256?: string } | undefined
+            try {
+              const m = await apiClient.getCloudFileMeta({ path: it.path, useData: true })
+              if (m && m.success && m.data) {
+                remoteHash = typeof m.data.sha256 === 'string' ? m.data.sha256 : ''
+                remoteMeta = {
+                  sizeBytes: typeof m.data.size_bytes === 'number' ? m.data.size_bytes : undefined,
+                  mtimeMs: typeof m.data.mtime_ms === 'number' ? m.data.mtime_ms : undefined,
+                  sha256: remoteHash || undefined,
+                }
+              }
+            } catch { void 0 }
+
+            if (remoteHash && remoteHash === localHash) {
+              skipped += 1
+              done += 1
+              setSyncStats((s) => ({ ...s, skipped: s.skipped + 1, done: s.done + 1 }))
+              appendSyncLog(`跳过（无变更）：${it.path}`)
+              continue
+            }
+
+            if (remoteHash && remoteHash !== localHash) {
+              conflicted += 1
+              setSyncStats((s) => ({ ...s, conflicted: s.conflicted + 1 }))
+              let localMtimeMs: number | undefined
+              try {
+                const st = await window.electronAPI.statPath?.(abs)
+                if (st && st.success && st.data && typeof st.data.mtimeMs === 'number') localMtimeMs = st.data.mtimeMs
+              } catch { void 0 }
+              const action = await askSyncConflict({
+                direction: 'upload',
+                path: it.path,
+                local: { sizeBytes: bytes.byteLength, mtimeMs: localMtimeMs, sha256: localHash },
+                remote: remoteMeta,
+              })
+              setSyncConflict(null)
+              syncConflictResolveRef.current = null
+              if (action === 'skip') {
+                skipped += 1
+                done += 1
+                setSyncStats((s) => ({ ...s, skipped: s.skipped + 1, done: s.done + 1 }))
+                appendSyncLog(`跳过（冲突）：${it.path}`)
+                continue
+              }
+            }
+
+            const blob = new Blob([u8ToArrayBuffer(bytes)], { type: 'application/octet-stream' })
+            const res = await apiClient.uploadCloudFile(blob, { path: it.path, mode: remoteHash ? 'force' : 'safe', useData: true })
+            if (res && res.success) {
+              done += 1
+              setSyncStats((s) => ({ ...s, done: s.done + 1 }))
+              appendSyncLog(`已上传：${it.path}`)
+            } else {
+              failed += 1
+              done += 1
+              setSyncStats((s) => ({ ...s, failed: s.failed + 1, done: s.done + 1 }))
+              appendSyncLog(`上传失败：${it.path}`)
+            }
+          } catch (e) {
+            failed += 1
+            done += 1
+            setSyncStats((s) => ({ ...s, failed: s.failed + 1, done: s.done + 1 }))
+            appendSyncLog(`上传失败：${it.path}（${e instanceof Error ? e.message : '未知错误'}）`)
+          }
+          continue
+        }
+
+        try {
+          const relPath = it.path
+          const dl = await apiClient.downloadCloudFile({ path: relPath, useData: true })
+          const bytes = new Uint8Array(dl.data)
+          const remoteHash = await sha256Hex(bytes)
+          const abs = joinPathUnix(root, relPath)
+
+          const existsRes = await window.electronAPI.existsPath(abs)
+          if (existsRes?.success && existsRes.data) {
+            const readRes = await window.electronAPI.readBytesFile(abs)
+            const localBytes = (readRes?.success && readRes.data) ? readRes.data : null
+            if (localBytes) {
+              const localHash = await sha256Hex(localBytes)
+              if (localHash === remoteHash) {
+                skipped += 1
+                done += 1
+                setSyncStats((s) => ({ ...s, skipped: s.skipped + 1, done: s.done + 1 }))
+                appendSyncLog(`跳过（无变更）：${relPath}`)
+                continue
+              }
+
+              conflicted += 1
+              setSyncStats((s) => ({ ...s, conflicted: s.conflicted + 1 }))
+              let localMtimeMs: number | undefined
+              try {
+                const st = await window.electronAPI.statPath?.(abs)
+                if (st && st.success && st.data && typeof st.data.mtimeMs === 'number') localMtimeMs = st.data.mtimeMs
+              } catch { void 0 }
+              const action = await askSyncConflict({
+                direction: 'download',
+                path: relPath,
+                local: { sizeBytes: localBytes.byteLength, mtimeMs: localMtimeMs, sha256: localHash },
+                remote: { sizeBytes: bytes.byteLength, mtimeMs: typeof dl.mtimeMs === 'number' ? dl.mtimeMs : undefined, sha256: remoteHash },
+              })
+              setSyncConflict(null)
+              syncConflictResolveRef.current = null
+              if (action === 'skip') {
+                skipped += 1
+                done += 1
+                setSyncStats((s) => ({ ...s, skipped: s.skipped + 1, done: s.done + 1 }))
+                appendSyncLog(`跳过（冲突）：${relPath}`)
+                continue
+              }
+              await backupLocalFileIfExists(root, abs)
+            }
+          }
+
+          await window.electronAPI.ensureDir(parentPath(abs))
+          const w = await window.electronAPI.saveBytesFile(abs, bytes)
+          if (w?.success) {
+            done += 1
+            setSyncStats((s) => ({ ...s, done: s.done + 1 }))
+            appendSyncLog(`已下载：${relPath}`)
+          } else {
+            failed += 1
+            done += 1
+            setSyncStats((s) => ({ ...s, failed: s.failed + 1, done: s.done + 1 }))
+            appendSyncLog(`写入失败：${relPath}`)
+          }
+        } catch (e) {
+          failed += 1
+          done += 1
+          setSyncStats((s) => ({ ...s, failed: s.failed + 1, done: s.done + 1 }))
+          appendSyncLog(`下载失败：${it.path}（${e instanceof Error ? e.message : '未知错误'}）`)
+        }
+      }
+    } finally {
+      setSyncRunning(false)
+      useToastStore.getState().showSuccess(`手动同步完成`, `完成 ${done}/${manualPlan.items.length}${failed > 0 ? `，失败 ${failed}` : ''}${skipped > 0 ? `，跳过 ${skipped}` : ''}${conflicted > 0 ? `，冲突 ${conflicted}` : ''}`)
+      try { useNoteFilesStore.getState().listDir(root) } catch { void 0 }
+    }
+  }, [appendSyncLog, askSyncConflict, backupLocalFileIfExists, getDefaultDir, manualPlan])
 
   useEffect(() => {
     if (!showCloudManager) return
@@ -524,11 +1035,7 @@ export default function NotebookTab() {
     try {
       const res = await apiClient.getCloudFilesTree({ path: pathRel || '', recursive: false, useData: true })
       if (res && res.success && res.data && Array.isArray(res.data.items)) {
-        const items = res.data.items.slice().sort((a, b) => {
-          if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
-          return a.name.localeCompare(b.name, 'zh-CN')
-        })
-        setCloudItems(items)
+        setCloudItems(res.data.items)
         setCloudPath(String(res.data.path || pathRel || ''))
       } else {
         useToastStore.getState().showError('加载云端目录失败', res?.message || '未知错误')
@@ -539,6 +1046,38 @@ export default function NotebookTab() {
       setCloudLoading(false)
     }
   }, [])
+
+  const cloudBreadcrumb = useMemo(() => {
+    const p = String(cloudPath || '').replace(/^\/+/, '').replace(/\/+$/, '')
+    const parts = p ? p.split('/').filter(Boolean) : []
+    const out: { label: string; path: string }[] = [{ label: '根目录', path: '' }]
+    let cur = ''
+    for (const seg of parts) {
+      cur = cur ? `${cur}/${seg}` : seg
+      out.push({ label: seg, path: cur })
+    }
+    return out
+  }, [cloudPath])
+
+  const cloudViewItems = useMemo(() => {
+    const q = cloudQuery.trim().toLowerCase()
+    const filtered = q
+      ? cloudItems.filter((it) => {
+          const name = String(it.name || '').toLowerCase()
+          const path = String(it.path || '').toLowerCase()
+          return name.includes(q) || path.includes(q)
+        })
+      : cloudItems
+
+    const dirSign = cloudSortDir === 'asc' ? 1 : -1
+    const key = cloudSortKey
+    return filtered.slice().sort((a, b) => {
+      if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
+      if (key === 'mtime') return (((a.mtime_ms || 0) - (b.mtime_ms || 0)) * dirSign)
+      if (key === 'size') return (((a.size_bytes || 0) - (b.size_bytes || 0)) * dirSign)
+      return a.name.localeCompare(b.name, 'zh-CN') * dirSign
+    })
+  }, [cloudItems, cloudQuery, cloudSortDir, cloudSortKey])
 
   const loadCloudTrash = useCallback(async () => {
     setCloudLoading(true)
@@ -634,7 +1173,7 @@ export default function NotebookTab() {
           return
         }
         const name = filePath.split(sepOf(filePath)).pop() || `file-${Date.now()}`
-        const blob = new Blob([read.data], { type: 'application/octet-stream' })
+        const blob = new Blob([u8ToArrayBuffer(read.data)], { type: 'application/octet-stream' })
         const target = joinCloudRel(cloudPath || '', name)
         const res = await apiClient.uploadCloudFile(blob, { path: target, mode: 'safe', useData: true })
         if (res && res.success) {
@@ -752,47 +1291,148 @@ export default function NotebookTab() {
     } catch { void 0 }
   }
 
-  const uploadCurrentFile = async () => {
+  const manualSyncAll = async () => {
     try {
-      if (!currentFile) { useToastStore.getState().showError('上传失败', '未选择文件'); return }
-      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
-      if (!enabled) { useToastStore.getState().showError('未开启云同步', '请在设置中开启'); return }
-      const root = getDefaultDir()
-      const ok = await useNoteFilesStore.getState().syncNoteFile(currentFile, root)
-      if (ok) {
-        const fileName = currentFile.split(sepOf(currentFile)).pop() || ''
-        useToastStore.getState().showSuccess('已上传到云端', fileName)
-      } else {
-        useToastStore.getState().showError('上传失败', '网络或权限错误')
-      }
+      await manualSyncNotes()
+      await manualSyncAttachments()
     } catch { void 0 }
   }
 
-  const downloadCurrentFile = async () => {
-    try {
-      if (!currentFile) { useToastStore.getState().showError('下载失败', '未选择文件'); return }
-      const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
-      if (!enabled) { useToastStore.getState().showError('未开启云同步', '请在设置中开启'); return }
-      const root = getDefaultDir()
-      const dir = parentPath(currentFile)
-      const noteDir = relativeDir(root, dir)
-      const fileName = currentFile.split(sepOf(currentFile)).pop() || 'note.md'
-      const res = await apiClient.getNotebookNote({ filename: fileName, noteDir, useData: true })
-      if (res && res.success && res.data && res.data.content !== undefined) {
-        const ok = await writeFile(currentFile, String(res.data.content))
-        if (ok) {
-          setContent(String(res.data.content))
-          useToastStore.getState().showSuccess('已下载云端内容', fileName)
-        } else {
-          useToastStore.getState().showError('写入失败', '无法写入本地文件')
-        }
-      } else {
-        useToastStore.getState().showError('下载失败', '云端无此文件')
-      }
-    } catch (e) {
-      useToastStore.getState().showError('下载失败', e instanceof Error ? e.message : '未知错误')
+  const quickSyncCurrentFile = useCallback(async () => {
+    if (quickSyncing) return
+    if (!window.electronAPI) {
+      setQuickSyncStatus({ state: 'error', atMs: Date.now(), message: '请在桌面应用模式下使用同步' })
+      useToastStore.getState().showError('不可用', '请在桌面应用模式下使用同步')
+      return
     }
-  }
+    if (!currentFile) {
+      setQuickSyncStatus({ state: 'error', atMs: Date.now(), message: '未选择文件' })
+      useToastStore.getState().showError('同步失败', '未选择文件')
+      return
+    }
+    const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
+    if (!enabled) {
+      setQuickSyncStatus({ state: 'error', atMs: Date.now(), message: '未开启云同步' })
+      useToastStore.getState().showError('未开启云同步', '请在设置中开启')
+      return
+    }
+    const root = getDefaultDir()
+    if (!root) {
+      setQuickSyncStatus({ state: 'error', atMs: Date.now(), message: '未设置目录' })
+      useToastStore.getState().showError('未设置目录', '请先选择记事本目录')
+      return
+    }
+
+    setQuickSyncing(true)
+    try {
+      const addRetryToast = (message: string) => {
+        useToastStore.getState().addToast({
+          type: 'error',
+          title: '同步失败',
+          message,
+          duration: 8000,
+          action: { label: '重试', onClick: () => { retryQuickSyncRef.current?.() } },
+        })
+      }
+
+      const abs = currentFile
+      const dir = parentPath(abs)
+      const relDir = relativeDir(root, dir)
+      const name = abs.split(sepOf(abs)).pop() || ''
+      const relPath = (relDir ? `${relDir}/${name}` : name).replace(/\\/g, '/').replace(/^\/+/, '')
+      if (!relPath) {
+        setQuickSyncStatus({ state: 'error', atMs: Date.now(), message: '无法计算相对路径' })
+        useToastStore.getState().showError('同步失败', '无法计算相对路径')
+        return
+      }
+
+      setQuickSyncStatus({ state: 'syncing', atMs: Date.now(), relPath })
+
+      const st = await window.electronAPI.statPath?.(abs)
+      const localMtimeMs = (st && st.success && st.data && typeof st.data.mtimeMs === 'number') ? st.data.mtimeMs : undefined
+
+      const readRes = await window.electronAPI.readBytesFile(abs)
+      if (!readRes?.success || !readRes.data) {
+        setQuickSyncStatus({ state: 'error', atMs: Date.now(), relPath, message: '读取本地文件失败' })
+        useToastStore.getState().showError('同步失败', '读取本地文件失败')
+        return
+      }
+      const localBytes = readRes.data
+      const localHash = await sha256Hex(localBytes)
+
+      let remoteHash = ''
+      let remoteMtimeMs: number | undefined
+      let remoteExists = false
+      try {
+        const meta = await apiClient.getCloudFileMeta({ path: relPath, useData: true })
+        if (meta && meta.success && meta.data && !meta.data.is_dir) {
+          remoteExists = true
+          remoteHash = typeof meta.data.sha256 === 'string' ? meta.data.sha256 : ''
+          remoteMtimeMs = typeof meta.data.mtime_ms === 'number' ? meta.data.mtime_ms : undefined
+        }
+      } catch { void 0 }
+
+      if (remoteExists && remoteHash && remoteHash === localHash) {
+        setQuickSyncStatus({ state: 'nochange', atMs: Date.now(), relPath })
+        useToastStore.getState().showSuccess('无变更', '云端与本地一致')
+        return
+      }
+
+      const shouldUpload =
+        !remoteExists
+          ? true
+          : (typeof localMtimeMs === 'number' && typeof remoteMtimeMs === 'number')
+              ? localMtimeMs >= remoteMtimeMs
+              : true
+
+      if (shouldUpload) {
+        const blob = new Blob([u8ToArrayBuffer(localBytes)], { type: 'application/octet-stream' })
+        const res = await apiClient.uploadCloudFile(blob, { path: relPath, mode: remoteExists ? 'force' : 'safe', useData: true })
+        if (res && res.success) {
+          setQuickSyncStatus({ state: 'success', atMs: Date.now(), relPath })
+          useToastStore.getState().showSuccess('已同步到云端', relPath)
+        } else {
+          const msg = (res && !res.success && String(res.message || '').toLowerCase().includes('conflict')) ? '云端存在更新冲突' : (res?.message || '上传失败')
+          setQuickSyncStatus({ state: 'error', atMs: Date.now(), relPath, message: msg })
+          addRetryToast(msg)
+        }
+        return
+      }
+
+      const dl = await apiClient.downloadCloudFile({ path: relPath, useData: true })
+      const bytes = new Uint8Array(dl.data)
+      await backupLocalFileIfExists(root, abs)
+      await window.electronAPI.ensureDir(parentPath(abs))
+      const w = await window.electronAPI.saveBytesFile(abs, bytes)
+      if (!w?.success) {
+        setQuickSyncStatus({ state: 'error', atMs: Date.now(), relPath, message: '写入本地失败' })
+        addRetryToast('写入本地失败')
+        return
+      }
+      try {
+        const text = await readFile(abs)
+        setContent(text || '')
+      } catch { void 0 }
+      setQuickSyncStatus({ state: 'success', atMs: Date.now(), relPath })
+      useToastStore.getState().showSuccess('已同步到本地', relPath)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '未知错误'
+      setQuickSyncStatus({ state: 'error', atMs: Date.now(), message: msg })
+      useToastStore.getState().addToast({
+        type: 'error',
+        title: '同步失败',
+        message: msg,
+        duration: 8000,
+        action: { label: '重试', onClick: () => { retryQuickSyncRef.current?.() } },
+      })
+    } finally {
+      setQuickSyncing(false)
+    }
+  }, [backupLocalFileIfExists, currentFile, getDefaultDir, quickSyncing, readFile])
+
+  useEffect(() => {
+    retryQuickSyncRef.current = () => { void quickSyncCurrentFile() }
+  }, [quickSyncCurrentFile])
 
   const chooseDir = async () => {
     try {
@@ -1134,7 +1774,7 @@ export default function NotebookTab() {
                   : fileName.toLowerCase().endsWith('.png') ? 'image/png'
                   : fileName.toLowerCase().endsWith('.webp') ? 'image/webp'
                   : 'application/octet-stream'
-                const blobU = new Blob([read.data], { type: typeGuess })
+                const blobU = new Blob([u8ToArrayBuffer(read.data)], { type: typeGuess })
                 await apiClient.uploadNotebookAttachment(blobU, { filename: fileName, noteDir, pathRel, useData: true })
                 useToastStore.getState().showSuccess('已同步到云端', `${fileName}`)
               }
@@ -1312,7 +1952,7 @@ export default function NotebookTab() {
             const res = await window.electronAPI.readBytesFile(abs)
             const u8 = res && res.success ? toUint8(res.data) : null
             if (u8 && u8.byteLength > 0) {
-              const blob = new Blob([u8], { type: guessType(rel) })
+              const blob = new Blob([u8ToArrayBuffer(u8)], { type: guessType(rel) })
               const url = URL.createObjectURL(blob)
               img.src = url
               ok = true
@@ -1543,6 +2183,30 @@ export default function NotebookTab() {
   }, [preview, content, applyPreviewSearch, searchQuery])
 
   const defaultFilePath = getDefaultFile()
+  const quickSyncText =
+    quickSyncing ? '同步中'
+    : quickSyncStatus.state === 'success' ? '已同步'
+    : quickSyncStatus.state === 'nochange' ? '无变更'
+    : quickSyncStatus.state === 'error' ? '重试'
+    : '同步'
+  const quickSyncTitle =
+    quickSyncing ? '同步中'
+    : quickSyncStatus.state === 'success' ? `已同步${quickSyncStatus.relPath ? `：${quickSyncStatus.relPath}` : ''}${quickSyncStatus.atMs ? `（${fmtTime(quickSyncStatus.atMs)}）` : ''}`
+    : quickSyncStatus.state === 'nochange' ? `无变更${quickSyncStatus.relPath ? `：${quickSyncStatus.relPath}` : ''}${quickSyncStatus.atMs ? `（${fmtTime(quickSyncStatus.atMs)}）` : ''}`
+    : quickSyncStatus.state === 'error' ? `失败可重试${quickSyncStatus.message ? `：${quickSyncStatus.message}` : ''}`
+    : '同步当前'
+  const syncSplitClass =
+    quickSyncing || saving ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
+    : quickSyncStatus.state === 'error' ? 'bg-red-100 text-red-700 hover:bg-red-200'
+    : quickSyncStatus.state === 'success' ? 'bg-green-100 text-green-700 hover:bg-green-200'
+    : quickSyncStatus.state === 'nochange' ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+    : 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
+  const syncSplitBorderClass =
+    quickSyncing || saving ? 'border-gray-200'
+    : quickSyncStatus.state === 'error' ? 'border-red-200'
+    : quickSyncStatus.state === 'success' ? 'border-green-200'
+    : quickSyncStatus.state === 'nochange' ? 'border-gray-200'
+    : 'border-indigo-200'
 
   return (
     <div className="h-full flex flex-col">
@@ -1563,22 +2227,43 @@ export default function NotebookTab() {
             <RefreshCw className="w-3 h-3" />
             <span className="hidden sm:inline">刷新</span>
           </button>
-          <div className="relative">
-            <button onClick={() => setShowSyncMenu(s => !s)} className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs bg-indigo-100 text-indigo-700 hover:bg-indigo-200 flex items-center space-x-1" title="同步">
+          <button onClick={saveContent} disabled={saving} className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs bg-green-100 text-green-700 hover:bg-green-200 flex items-center space-x-1" title={saving ? '保存中' : '保存'}>
+            <Save className="w-3 h-3" />
+            <span className="hidden sm:inline">{saving ? '保存中' : '保存'}</span>
+          </button>
+          <div ref={syncMenuRef} className="relative inline-flex">
+            <button
+              onClick={async () => { setShowSyncMenu(false); await quickSyncCurrentFile() }}
+              disabled={quickSyncing || saving}
+              className={`px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-l text-xs flex items-center space-x-1 ${syncSplitClass}`}
+              title={quickSyncTitle}
+            >
               <Cloud className="w-3 h-3" />
-              <span className="hidden sm:inline">同步 ▾</span>
+              <span className="hidden sm:inline">{quickSyncText}</span>
+            </button>
+            <button
+              onClick={() => setShowSyncMenu(s => !s)}
+              disabled={quickSyncing || saving}
+              className={`px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-r text-xs ${syncSplitClass} border-l ${syncSplitBorderClass} flex items-center`}
+              title="更多同步选项"
+            >
+              <ChevronDown className="w-3 h-3" />
             </button>
             {showSyncMenu && (
               <div className="absolute right-0 mt-1 bg-white border border-gray-200 rounded shadow p-2 z-10 min-w-[180px]">
                 <div className="flex flex-col space-y-1">
                   <button
+                    onClick={() => { setCloudTab('files'); setShowCloudManager(true); setShowSyncMenu(false) }}
+                    className="px-2 py-1 rounded text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-left"
+                  >云端文件</button>
+                  <button
                     onClick={() => { setShowManualSync(true); setShowSyncMenu(false) }}
                     className="px-2 py-1 rounded text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-left"
                   >手动同步</button>
-                  <button onClick={manualSyncNotes} className="px-2 py-1 rounded text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-left">同步笔记</button>
-                  <button onClick={manualSyncAttachments} className="px-2 py-1 rounded text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-left">同步附件</button>
-                  <button onClick={uploadCurrentFile} className="px-2 py-1 rounded text-xs bg-green-50 text-green-700 hover:bg-green-100 text-left">上传当前</button>
-                  <button onClick={downloadCurrentFile} className="px-2 py-1 rounded text-xs bg-yellow-50 text-yellow-700 hover:bg-yellow-100 text-left">下载当前</button>
+                  <button
+                    onClick={async () => { await manualSyncAll(); setShowSyncMenu(false) }}
+                    className="px-2 py-1 rounded text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-left"
+                  >同步全部（笔记+附件）</button>
                   <div className="border-t border-gray-200 my-1" />
                   <button
                     onClick={async () => {
@@ -1594,32 +2279,16 @@ export default function NotebookTab() {
                   >刷新自动</button>
                   <button
                     onClick={async () => {
-                      await useSettingsStore.getState().setSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, !autoNotesSetting)
+                      const next = !autoSyncAllSetting
+                      await useSettingsStore.getState().setSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, next)
+                      await useSettingsStore.getState().setSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, next)
                     }}
-                    className={`px-2 py-1 rounded text-xs text-left ${autoNotesSetting ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                  >自动笔记</button>
-                  <button
-                    onClick={async () => {
-                      await useSettingsStore.getState().setSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, !autoAttSetting)
-                    }}
-                    className={`px-2 py-1 rounded text-xs text-left ${autoAttSetting ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                  >自动附件</button>
+                    className={`px-2 py-1 rounded text-xs text-left ${autoSyncAllSetting ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  >自动同步</button>
                 </div>
               </div>
             )}
           </div>
-          <button
-            onClick={() => { setCloudTab('files'); setShowCloudManager(true) }}
-            className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 flex items-center space-x-1"
-            title="云端文件管理"
-          >
-            <Cloud className="w-3 h-3" />
-            <span className="hidden sm:inline">云端文件</span>
-          </button>
-          <button onClick={saveContent} disabled={saving} className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs bg-green-100 text-green-700 hover:bg-green-200 flex items-center space-x-1" title={saving ? '保存中' : '保存'}>
-            <Save className="w-3 h-3" />
-            <span className="hidden sm:inline">{saving ? '保存中' : '保存'}</span>
-          </button>
           <button onClick={() => setPreview(v => !v)} className="px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center space-x-1" title={preview ? '编辑' : '预览'}>
             {preview ? <Pencil className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
             <span className="hidden sm:inline">{preview ? '编辑' : '预览'}</span>
@@ -1737,21 +2406,41 @@ export default function NotebookTab() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
-              <div className="text-xs text-gray-600 truncate max-w-[60%]" title={getDefaultDir() || ''}>
+            <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between gap-3">
+              <div className="text-xs text-gray-600 truncate max-w-[40%]" title={getDefaultDir() || ''}>
                 本地目录：{getDefaultDir() || '未设置'}
               </div>
               <div className="flex items-center space-x-2">
                 <button
+                  onClick={() => setManualSyncMode('download')}
+                  disabled={syncRunning}
+                  className={`px-2 py-1 rounded text-xs ${manualSyncMode === 'download' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} ${syncRunning ? 'opacity-60 cursor-not-allowed' : ''}`}
+                >云端 → 本地</button>
+                <button
+                  onClick={() => setManualSyncMode('upload')}
+                  disabled={syncRunning}
+                  className={`px-2 py-1 rounded text-xs ${manualSyncMode === 'upload' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} ${syncRunning ? 'opacity-60 cursor-not-allowed' : ''}`}
+                >本地 → 云端</button>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={async () => {
+                    if (manualSyncMode === 'download') await refreshManualCloudFiles()
+                    else await refreshManualLocalFiles()
+                  }}
+                  disabled={syncRunning || manualPlanning}
+                  className={`px-2 py-1 rounded text-xs ${syncRunning || manualPlanning ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                >刷新列表</button>
+                <button
                   onClick={manualSyncDownloadAllCloud}
                   disabled={syncRunning}
                   className={`px-2 py-1 rounded text-xs ${syncRunning ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100'}`}
-                >从云端下载全部</button>
+                >下载全部</button>
                 <button
                   onClick={manualSyncUploadAllLocal}
                   disabled={syncRunning}
                   className={`px-2 py-1 rounded text-xs ${syncRunning ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : 'bg-green-50 text-green-700 hover:bg-green-100'}`}
-                >上传本地全部</button>
+                >上传全部</button>
                 <button
                   onClick={() => { syncAbortRef.current = true }}
                   disabled={!syncRunning}
@@ -1769,12 +2458,210 @@ export default function NotebookTab() {
               </div>
               <div className="text-[10px] text-gray-400">{syncRunning ? '进行中…' : '空闲'}</div>
             </div>
-            <div className="flex-1 min-h-0 overflow-auto p-3">
-              {syncLogs.length === 0 ? (
-                <div className="text-xs text-gray-500">点击上方按钮开始同步</div>
-              ) : (
-                <pre className="text-xs whitespace-pre-wrap break-words text-gray-800">{syncLogs.join('\n')}</pre>
-              )}
+            <div className="flex-1 min-h-0 flex">
+              <div className="w-[45%] border-r border-gray-100 min-h-0 flex flex-col">
+                <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between gap-2">
+                  <div className="text-xs text-gray-700">{manualSyncMode === 'download' ? '选择云端文件' : '选择本地文件'}</div>
+                  <div className="text-[10px] text-gray-400">
+                    {manualSyncMode === 'download'
+                      ? `${Object.values(manualCloudSelected).filter(Boolean).length}/${manualCloudFiles.length}`
+                      : `${Object.values(manualLocalSelected).filter(Boolean).length}/${manualLocalFiles.length}`}
+                  </div>
+                </div>
+                <div className="px-3 py-2 border-b border-gray-100 flex items-center gap-2">
+                  <input
+                    value={manualSyncMode === 'download' ? manualCloudQuery : manualLocalQuery}
+                    onChange={(e) => (manualSyncMode === 'download' ? setManualCloudQuery(e.target.value) : setManualLocalQuery(e.target.value))}
+                    placeholder="筛选路径"
+                    className="flex-1 px-2 py-1 border rounded text-xs outline-none"
+                    disabled={syncRunning || manualPlanning}
+                  />
+                  <button
+                    onClick={() => {
+                      if (manualSyncMode === 'download') setManualCloudQuery('')
+                      else setManualLocalQuery('')
+                    }}
+                    disabled={syncRunning || manualPlanning}
+                    className={`px-2 py-1 rounded text-xs ${syncRunning || manualPlanning ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  >清空</button>
+                </div>
+                <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
+                  <button
+                    onClick={() => {
+                      if (manualSyncMode === 'download') {
+                        const q = manualCloudQuery.trim().toLowerCase()
+                        const visible = manualCloudFiles.filter(f => !q || f.path.toLowerCase().includes(q))
+                        const next: Record<string, boolean> = { ...manualCloudSelected }
+                        for (const f of visible) next[f.path] = true
+                        setManualCloudSelected(next)
+                      } else {
+                        const q = manualLocalQuery.trim().toLowerCase()
+                        const visible = manualLocalFiles.filter(f => !q || f.relPath.toLowerCase().includes(q))
+                        const next: Record<string, boolean> = { ...manualLocalSelected }
+                        for (const f of visible) next[f.relPath] = true
+                        setManualLocalSelected(next)
+                      }
+                    }}
+                    disabled={syncRunning || manualPlanning}
+                    className={`px-2 py-1 rounded text-xs ${syncRunning || manualPlanning ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}
+                  >全选</button>
+                  <button
+                    onClick={() => {
+                      if (manualSyncMode === 'download') setManualCloudSelected({})
+                      else setManualLocalSelected({})
+                    }}
+                    disabled={syncRunning || manualPlanning}
+                    className={`px-2 py-1 rounded text-xs ${syncRunning || manualPlanning ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  >清空选择</button>
+                </div>
+                <div className="flex-1 min-h-0 overflow-auto">
+                  {manualSyncMode === 'download' ? (
+                    (manualCloudFiles.filter((f) => {
+                      const q = manualCloudQuery.trim().toLowerCase()
+                      return !q || f.path.toLowerCase().includes(q)
+                    }).length === 0) ? (
+                      <div className="p-3 text-xs text-gray-500">无匹配文件</div>
+                    ) : (
+                      <ul className="p-2 space-y-1">
+                        {manualCloudFiles
+                          .filter((f) => {
+                            const q = manualCloudQuery.trim().toLowerCase()
+                            return !q || f.path.toLowerCase().includes(q)
+                          })
+                          .map((f) => (
+                            <li key={f.path} className="flex items-center space-x-2 text-xs px-2 py-1 rounded hover:bg-gray-50">
+                              <input
+                                type="checkbox"
+                                checked={!!manualCloudSelected[f.path]}
+                                onChange={(e) => setManualCloudSelected((prev) => ({ ...prev, [f.path]: e.target.checked }))}
+                                disabled={syncRunning || manualPlanning}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="truncate text-gray-800" title={f.path}>{f.path}</div>
+                                <div className="text-[10px] text-gray-400 flex items-center space-x-2">
+                                  <span>{fmtBytes(f.sizeBytes)}</span>
+                                  <span>{fmtTime(f.mtimeMs)}</span>
+                                </div>
+                              </div>
+                            </li>
+                          ))}
+                      </ul>
+                    )
+                  ) : (
+                    (manualLocalFiles.filter((f) => {
+                      const q = manualLocalQuery.trim().toLowerCase()
+                      return !q || f.relPath.toLowerCase().includes(q)
+                    }).length === 0) ? (
+                      <div className="p-3 text-xs text-gray-500">无匹配文件</div>
+                    ) : (
+                      <ul className="p-2 space-y-1">
+                        {manualLocalFiles
+                          .filter((f) => {
+                            const q = manualLocalQuery.trim().toLowerCase()
+                            return !q || f.relPath.toLowerCase().includes(q)
+                          })
+                          .map((f) => (
+                            <li key={f.relPath} className="flex items-center space-x-2 text-xs px-2 py-1 rounded hover:bg-gray-50">
+                              <input
+                                type="checkbox"
+                                checked={!!manualLocalSelected[f.relPath]}
+                                onChange={(e) => setManualLocalSelected((prev) => ({ ...prev, [f.relPath]: e.target.checked }))}
+                                disabled={syncRunning || manualPlanning}
+                              />
+                              <div className="truncate text-gray-800 flex-1 min-w-0" title={f.relPath}>{f.relPath}</div>
+                            </li>
+                          ))}
+                      </ul>
+                    )
+                  )}
+                </div>
+              </div>
+              <div className="flex-1 min-h-0 flex flex-col">
+                <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => setManualSyncRightTab('plan')}
+                      className={`px-2 py-1 rounded text-xs ${manualSyncRightTab === 'plan' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                    >计划</button>
+                    <button
+                      onClick={() => setManualSyncRightTab('logs')}
+                      className={`px-2 py-1 rounded text-xs ${manualSyncRightTab === 'logs' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                    >日志</button>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={buildManualSyncPlan}
+                      disabled={syncRunning || manualPlanning}
+                      className={`px-2 py-1 rounded text-xs ${syncRunning || manualPlanning ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}
+                    >生成计划</button>
+                    <button
+                      onClick={runManualSyncPlan}
+                      disabled={syncRunning || manualPlanning || !manualPlan || manualPlan.mode !== manualSyncMode || manualPlan.items.length === 0}
+                      className={`px-2 py-1 rounded text-xs ${syncRunning || manualPlanning || !manualPlan || manualPlan.mode !== manualSyncMode || manualPlan.items.length === 0 ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : 'bg-green-50 text-green-700 hover:bg-green-100'}`}
+                    >开始执行</button>
+                  </div>
+                </div>
+                {manualSyncRightTab === 'plan' && (
+                  <div className="flex-1 min-h-0 overflow-auto p-3">
+                    {!manualPlan || manualPlan.mode !== manualSyncMode ? (
+                      <div className="text-xs text-gray-500">先选择文件，然后点击“生成计划”</div>
+                    ) : (
+                      <>
+                        <div className="text-xs text-gray-700 flex items-center justify-between">
+                          <div className="truncate" title={manualPlan.mode === 'download' ? '云端 → 本地' : '本地 → 云端'}>
+                            方向：{manualPlan.mode === 'download' ? '云端 → 本地' : '本地 → 云端'}
+                          </div>
+                          <div className="text-[10px] text-gray-400">{fmtTime(manualPlan.createdAtMs)}</div>
+                        </div>
+                        <div className="mt-2 text-xs text-gray-600 flex items-center space-x-3">
+                          <span>总数 {manualPlan.stats.total}</span>
+                          <span>待执行 {manualPlan.stats.willDo}</span>
+                          <span>跳过 {manualPlan.stats.skipped}</span>
+                          <span>冲突 {manualPlan.stats.conflicted}</span>
+                          <span>错误 {manualPlan.stats.errors}</span>
+                        </div>
+                        <div className="mt-3 border rounded overflow-hidden">
+                          <div className="px-2 py-1 bg-gray-50 text-[10px] text-gray-500 flex items-center justify-between">
+                            <span>动作</span>
+                            <span>路径</span>
+                          </div>
+                          <ul className="divide-y">
+                            {manualPlan.items.map((it) => {
+                              const badge =
+                                it.action === 'upload' ? '上传' :
+                                it.action === 'download' ? '下载' :
+                                it.action === 'skip' ? '跳过' :
+                                it.action === 'conflict' ? '冲突' :
+                                '错误'
+                              const badgeCls =
+                                it.action === 'upload' ? 'bg-green-50 text-green-700' :
+                                it.action === 'download' ? 'bg-yellow-50 text-yellow-700' :
+                                it.action === 'skip' ? 'bg-gray-100 text-gray-700' :
+                                it.action === 'conflict' ? 'bg-red-50 text-red-700' :
+                                'bg-gray-100 text-gray-700'
+                              return (
+                                <li key={`${it.mode}:${it.path}`} className="px-2 py-1 text-xs flex items-center space-x-2">
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] ${badgeCls}`}>{badge}</span>
+                                  <span className="truncate flex-1 min-w-0" title={it.path}>{it.path}</span>
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+                {manualSyncRightTab === 'logs' && (
+                  <div className="flex-1 min-h-0 overflow-auto p-3">
+                    {syncLogs.length === 0 ? (
+                      <div className="text-xs text-gray-500">点击“开始执行”后会输出日志</div>
+                    ) : (
+                      <pre className="text-xs whitespace-pre-wrap break-words text-gray-800">{syncLogs.join('\n')}</pre>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
             {syncConflict && (
               <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
@@ -1790,6 +2677,7 @@ export default function NotebookTab() {
                     <div className="border rounded p-2">
                       <div className="text-[10px] text-gray-400 mb-1">本地</div>
                       <div>大小：{fmtBytes(syncConflict.local?.sizeBytes)}</div>
+                      <div>时间：{fmtTime(syncConflict.local?.mtimeMs) || '-'}</div>
                       <div className="truncate" title={syncConflict.local?.sha256 || ''}>SHA256：{syncConflict.local?.sha256 ? String(syncConflict.local.sha256).slice(0, 12) + '…' : '-'}</div>
                     </div>
                     <div className="border rounded p-2">
@@ -1850,7 +2738,21 @@ export default function NotebookTab() {
               <div className="flex items-center space-x-2">
                 {cloudTab === 'files' && (
                   <>
-                    <div className="text-xs text-gray-600 max-w-[36vw] truncate" title={cloudPath || '/'}>{cloudPath || '/'}</div>
+                    <div className="text-xs text-gray-600 max-w-[36vw] overflow-hidden" title={cloudPath || '/'}>
+                      <div className="flex items-center space-x-1 overflow-x-auto whitespace-nowrap">
+                        {cloudBreadcrumb.map((seg, idx) => (
+                          <div key={seg.path || 'root'} className="flex items-center space-x-1">
+                            {idx > 0 && <ChevronRight className="w-3 h-3 text-gray-300" />}
+                            <button
+                              onClick={() => { setCloudSelectedPath(''); setCloudPreview(null); loadCloudTree(seg.path) }}
+                              className={`px-1 rounded ${idx === cloudBreadcrumb.length - 1 ? 'text-gray-900' : 'text-indigo-600 hover:underline'}`}
+                            >
+                              {idx === 0 ? '/' : seg.label}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                     <button
                       onClick={() => loadCloudTree(cloudPath || '')}
                       className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200"
@@ -1860,6 +2762,32 @@ export default function NotebookTab() {
                       disabled={!cloudPath}
                       className={`px-2 py-1 rounded text-xs ${cloudPath ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-gray-50 text-gray-400 cursor-not-allowed'}`}
                     >上一级</button>
+                    <div className="relative">
+                      <Search className="w-3 h-3 text-gray-400 absolute left-2 top-1/2 -translate-y-1/2" />
+                      <input
+                        value={cloudQuery}
+                        onChange={(e) => setCloudQuery(e.target.value)}
+                        className="pl-7 pr-2 py-1 w-[160px] rounded text-xs bg-gray-50 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                        placeholder="搜索"
+                      />
+                    </div>
+                    <select
+                      value={cloudSortKey}
+                      onChange={(e) => setCloudSortKey(e.target.value as 'name' | 'mtime' | 'size')}
+                      className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 border border-transparent"
+                      title="排序"
+                    >
+                      <option value="name">名称</option>
+                      <option value="mtime">时间</option>
+                      <option value="size">大小</option>
+                    </select>
+                    <button
+                      onClick={() => setCloudSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+                      className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center"
+                      title={cloudSortDir === 'asc' ? '升序' : '降序'}
+                    >
+                      {cloudSortDir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    </button>
                     <button
                       onClick={chooseAndUploadCloud}
                       className="px-2 py-1 rounded text-xs bg-green-50 text-green-700 hover:bg-green-100 flex items-center space-x-1"
@@ -1894,11 +2822,11 @@ export default function NotebookTab() {
                 )}
                 {!cloudLoading && cloudTab === 'files' && (
                   <div className="flex-1 min-h-0 overflow-auto">
-                    {cloudItems.length === 0 ? (
-                      <div className="p-3 text-xs text-gray-500">空目录</div>
+                    {cloudViewItems.length === 0 ? (
+                      <div className="p-3 text-xs text-gray-500">{cloudQuery.trim() ? '无匹配结果' : '空目录'}</div>
                     ) : (
                       <ul className="p-1">
-                        {cloudItems.map((it) => (
+                        {cloudViewItems.map((it) => (
                           <li key={it.path} className={`px-2 py-1 rounded text-xs flex items-center space-x-2 ${cloudSelectedPath === it.path ? 'bg-indigo-50' : 'hover:bg-gray-50'}`}>
                             <button
                               onClick={() => {

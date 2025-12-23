@@ -84,5 +84,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveBytesFile: (filePath, bytes) => ipcRenderer.invoke('fs-save-bytes', filePath, bytes),
   readBytesFile: (filePath) => ipcRenderer.invoke('fs-read-bytes', filePath),
   readDataUrlFile: (filePath) => ipcRenderer.invoke('fs-read-dataurl', filePath),
+  statPath: (targetPath) => ipcRenderer.invoke('fs-stat', targetPath),
   existsPath: (targetPath) => ipcRenderer.invoke('fs-exists', targetPath),
 });

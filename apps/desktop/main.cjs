@@ -2,8 +2,11 @@ const { app, BrowserWindow, Menu, shell, ipcMain, dialog, Tray, nativeImage, cli
 const path = require('path');
 const fs = require('fs');
 
-const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
-const devServerUrl = process.env.DESKTOP_DEV_SERVER_URL || process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+const nodeEnv = String(process.env.NODE_ENV || '').toLowerCase();
+const forceProd = nodeEnv === 'production';
+const isDev = !forceProd && (nodeEnv === 'development' || !app.isPackaged);
+const devServerUrlEnv = process.env.DESKTOP_DEV_SERVER_URL || process.env.VITE_DEV_SERVER_URL;
+const devServerUrl = devServerUrlEnv || 'http://localhost:5173';
 // 关闭按钮行为：'minimize' | 'hide' | 'quit'
 let userCloseBehavior = 'minimize';
 // Token 存储模式：默认磁盘，可通过环境变量切换为内存
@@ -545,6 +548,7 @@ function startClipboardMonitoring(window) {
 
 function createWindow() {
   const initState = loadWindowState();
+  let devFallbackShown = false;
   mainWindow = new BrowserWindow({
     width: initState.width,
     height: initState.height,
@@ -588,20 +592,115 @@ function createWindow() {
     })
   });
 
+  if (isDev) {
+    mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+      try {
+        console.log('[renderer:console]', { level, message, line, sourceId });
+      } catch (_) {
+        void 0;
+      }
+    });
+  }
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    try {
+      console.error('[main] render-process-gone', details);
+      dialog.showErrorBox('渲染进程异常退出', JSON.stringify(details, null, 2));
+    } catch (_) {
+      void 0;
+    }
+  });
+
   // 生产模式下隐藏菜单栏
   if (!isDev) {
     mainWindow.setMenuBarVisibility(false);
   }
 
   // 加载应用
-  if (isDev) {
+  const indexPath = path.join(__dirname, 'frontend', 'dist', 'index.html');
+  const hasBuiltFrontend = (() => {
+    try {
+      return fs.existsSync(indexPath);
+    } catch {
+      return false;
+    }
+  })();
+  const useDevServer = !forceProd && !!devServerUrlEnv;
+  const useLocalFile = forceProd || (!useDevServer && hasBuiltFrontend);
+
+  if (!useLocalFile) {
     console.log('[main] devServerUrl:', devServerUrl);
-    mainWindow.loadURL(devServerUrl);
-    // 开发模式下打开开发者工具
-    mainWindow.webContents.openDevTools();
+    mainWindow.loadURL(devServerUrl).catch((err) => {
+      try { console.error('[main] loadURL failed', err); } catch (_) {}
+      if (devFallbackShown) return;
+      devFallbackShown = true;
+      const html = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>xPaste - 启动失败</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif;margin:0;background:#0b1220;color:#e5e7eb}
+    .wrap{max-width:760px;margin:0 auto;padding:28px}
+    .card{background:#111827;border:1px solid #1f2937;border-radius:12px;padding:18px}
+    code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+    .muted{color:#9ca3af}
+    .cmd{background:#0b1220;border:1px solid #243041;border-radius:8px;padding:10px;margin:10px 0;white-space:pre-wrap}
+    a{color:#93c5fd}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>窗口白屏：前端开发服务未就绪</h2>
+    <div class="card">
+      <div class="muted">Electron 处于开发模式，正在加载：</div>
+      <div class="cmd">${devServerUrl}</div>
+      <div class="muted">请在项目根目录运行下面命令启动（会同时启动 Vite + Electron）：</div>
+      <div class="cmd">pnpm --filter desktop electron:dev</div>
+      <div class="muted">如果你想跑生产模式（先构建再启动）：</div>
+      <div class="cmd">pnpm --filter desktop build\npnpm --filter desktop electron</div>
+    </div>
+  </div>
+</body>
+</html>`;
+      mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => {});
+    });
   } else {
-    const indexPath = path.join(__dirname, 'frontend', 'dist', 'index.html');
-    mainWindow.loadFile(indexPath);
+    mainWindow.loadFile(indexPath).catch((err) => {
+      try { console.error('[main] loadFile failed', { indexPath, err }); } catch (_) {}
+      const html = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>xPaste - 启动失败</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif;margin:0;background:#0b1220;color:#e5e7eb}
+    .wrap{max-width:760px;margin:0 auto;padding:28px}
+    .card{background:#111827;border:1px solid #1f2937;border-radius:12px;padding:18px}
+    .muted{color:#9ca3af}
+    .cmd{background:#0b1220;border:1px solid #243041;border-radius:8px;padding:10px;margin:10px 0;white-space:pre-wrap}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>生产页面缺失：未构建或打包不完整</h2>
+    <div class="card">
+      <div class="muted">找不到：</div>
+      <div class="cmd">${indexPath}</div>
+      <div class="muted">请先构建前端：</div>
+      <div class="cmd">pnpm --filter desktop build</div>
+    </div>
+  </div>
+</body>
+</html>`;
+      mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => {});
+    });
+  }
+
+  if (useDevServer && isDev) {
+    mainWindow.webContents.openDevTools();
   }
 
   // 渲染流程事件监控，便于定位生产环境空白窗口问题
@@ -614,6 +713,36 @@ function createWindow() {
     try {
       dialog.showErrorBox('页面加载失败', `${errorDescription} (code: ${errorCode})\nURL: ${validatedURL || 'file://index.html'}`);
     } catch (_) {}
+    if (isDev && isMainFrame && !devFallbackShown) {
+      devFallbackShown = true;
+      const html = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>xPaste - 启动失败</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif;margin:0;background:#0b1220;color:#e5e7eb}
+    .wrap{max-width:760px;margin:0 auto;padding:28px}
+    .card{background:#111827;border:1px solid #1f2937;border-radius:12px;padding:18px}
+    .muted{color:#9ca3af}
+    .cmd{background:#0b1220;border:1px solid #243041;border-radius:8px;padding:10px;margin:10px 0;white-space:pre-wrap}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>页面加载失败</h2>
+    <div class="card">
+      <div class="muted">开发模式需要前端服务：</div>
+      <div class="cmd">pnpm --filter desktop electron:dev</div>
+      <div class="muted">当前尝试加载：</div>
+      <div class="cmd">${validatedURL || devServerUrl}</div>
+    </div>
+  </div>
+</body>
+</html>`;
+      mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => {});
+    }
   });
 
   // 窗口准备好后显示（show:true 已提前显示，这里保证绘制完成后聚焦）
@@ -1537,6 +1666,28 @@ ipcMain.handle('fs-read-dataurl', async (event, filePath) => {
     return { success: true, data: dataUrl };
   } catch (err) {
     return { success: false, error: err?.message || 'read failed' };
+  }
+});
+
+ipcMain.handle('fs-stat', async (event, targetPath) => {
+  try {
+    if (!targetPath || typeof targetPath !== 'string') {
+      return { success: false, error: 'invalid path' };
+    }
+    const st = fs.statSync(targetPath);
+    return {
+      success: true,
+      data: {
+        isFile: st.isFile(),
+        isDirectory: st.isDirectory(),
+        sizeBytes: st.size,
+        mtimeMs: st.mtimeMs,
+        ctimeMs: st.ctimeMs,
+        atimeMs: st.atimeMs,
+      },
+    };
+  } catch (err) {
+    return { success: false, error: err?.message || 'stat failed' };
   }
 });
 

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -490,7 +491,7 @@ func (h *CloudFilesHandler) Rename(c *gin.Context) {
 		return
 	}
 
-	if err := os.Rename(fromAbs, toAbs); err != nil {
+	if err := moveOrCopyPath(fromAbs, toAbs, fromInfo.IsDir()); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseWithMessage("Rename failed", err.Error()))
 		return
 	}
@@ -552,7 +553,7 @@ func (h *CloudFilesHandler) Delete(c *gin.Context) {
 
 	payloadName := "payload"
 	payloadAbs := filepath.Join(itemDir, payloadName)
-	if err := os.Rename(abs, payloadAbs); err != nil {
+	if err := moveOrCopyPath(abs, payloadAbs, fi.IsDir()); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseWithMessage("Move failed", err.Error()))
 		return
 	}
@@ -685,7 +686,7 @@ func (h *CloudFilesHandler) RestoreTrash(c *gin.Context) {
 		return
 	}
 
-	if err := os.Rename(payloadAbs, targetAbs); err != nil {
+	if err := moveOrCopyPath(payloadAbs, targetAbs, meta.IsDir); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseWithMessage("Restore failed", err.Error()))
 		return
 	}
@@ -743,7 +744,11 @@ func (h *CloudFilesHandler) getUserRoot(c *gin.Context, useData bool) (string, s
 	cfg, _ := config.Load()
 	base := cfg.Upload.UploadPath
 	if useData {
-		base = filepath.Join(".", "data", "uploads")
+		if st, err := os.Stat("/data"); err == nil && st.IsDir() {
+			base = filepath.Join("/data", "uploads")
+		} else {
+			base = filepath.Join(".", "data", "uploads")
+		}
 	}
 
 	userKey := cleanFileName(uname)
@@ -774,8 +779,13 @@ func isReservedUserRelPath(rel string) bool {
 	if rel == "" {
 		return false
 	}
-	first := strings.SplitN(rel, "/", 2)[0]
-	return first == cloudFilesTrashDirName || first == cloudFilesBackupsDirName
+	parts := strings.Split(rel, "/")
+	for _, seg := range parts {
+		if seg == cloudFilesTrashDirName || seg == cloudFilesBackupsDirName {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeMode(mode string) string {
@@ -916,7 +926,7 @@ func (h *CloudFilesHandler) backupExisting(root string, relPath string, absPath 
 	dstAbs := filepath.Join(backupDir, dstName)
 
 	if fi.IsDir() {
-		if err := os.Rename(absPath, dstAbs); err != nil {
+		if err := moveOrCopyPath(absPath, dstAbs, true); err != nil {
 			return "", err
 		}
 		return filepath.ToSlash(filepath.Join(cloudFilesBackupsDirName, date, dir, dstName)), nil
@@ -952,4 +962,106 @@ func moveOrCopyFile(src string, dst string) error {
 		return err
 	}
 	return os.Remove(src)
+}
+
+func isCrossDeviceRenameError(err error) bool {
+	var linkErr *os.LinkError
+	if errors.As(err, &linkErr) {
+		return errors.Is(linkErr.Err, syscall.EXDEV)
+	}
+	return errors.Is(err, syscall.EXDEV)
+}
+
+func copyDirRecursive(src string, dst string) error {
+	fi, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return errors.New("source is not a directory")
+	}
+
+	if err := os.MkdirAll(dst, fi.Mode().Perm()); err != nil {
+		return err
+	}
+
+	return filepath.WalkDir(src, func(p string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if p == src {
+			return nil
+		}
+
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+
+		if d.Type()&os.ModeSymlink != 0 {
+			return errors.New("symlink is not supported")
+		}
+
+		if d.IsDir() {
+			if info, err := d.Info(); err == nil {
+				return os.MkdirAll(target, info.Mode().Perm())
+			}
+			return os.MkdirAll(target, 0o755)
+		}
+
+		in, err := os.Open(p)
+		if err != nil {
+			return err
+		}
+
+		if err := ensureParentDir(target); err != nil {
+			_ = in.Close()
+			return err
+		}
+
+		out, err := os.Create(target)
+		if err != nil {
+			_ = in.Close()
+			return err
+		}
+
+		if _, err := io.Copy(out, in); err != nil {
+			_ = out.Close()
+			_ = in.Close()
+			return err
+		}
+		if err := out.Sync(); err != nil {
+			_ = out.Close()
+			_ = in.Close()
+			return err
+		}
+		if err := out.Close(); err != nil {
+			_ = in.Close()
+			return err
+		}
+		_ = in.Close()
+
+		if info, err := d.Info(); err == nil {
+			_ = os.Chmod(target, info.Mode().Perm())
+		}
+		return nil
+	})
+}
+
+func moveOrCopyPath(src string, dst string, isDir bool) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	} else if !isCrossDeviceRenameError(err) {
+		return err
+	}
+
+	if isDir {
+		if err := copyDirRecursive(src, dst); err != nil {
+			return err
+		}
+		return os.RemoveAll(src)
+	}
+
+	return moveOrCopyFile(src, dst)
 }

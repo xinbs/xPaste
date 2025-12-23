@@ -62,6 +62,10 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 RUN mkdir -p /data /app/logs && \
     chown -R xpaste:xpaste /app /data
 
+ENV DB_DRIVER=sqlite
+ENV DB_DSN=/data/xpaste.db
+ENV UPLOAD_PATH=/data/uploads
+
 # 切换到非 root 用户
 USER xpaste
 

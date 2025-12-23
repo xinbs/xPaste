@@ -61,9 +61,8 @@ echo "ℹ️  当前架构: $ARCH"
 # -c.compression=store: 不压缩，打包速度最快
 # -c.mac.identity=null: 跳过代码签名 (仅用于本地测试)
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    echo "🍎 正在构建 macOS 应用 (DMG)..."
-    # 跳过签名，使用 store 压缩
-    ./node_modules/.bin/electron-builder build --mac $BUILDER_ARCH -c.compression=store -c.mac.identity=null
+    echo "🍎 正在构建 macOS 应用 (dir，用于本地启动测试)..."
+    ./node_modules/.bin/electron-builder build --mac $BUILDER_ARCH --dir -c.compression=store -c.mac.identity=null -c.mac.target=dir
     
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
     echo "🐧 正在构建 Linux 应用..."
