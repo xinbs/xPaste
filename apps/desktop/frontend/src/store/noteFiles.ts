@@ -9,6 +9,10 @@ type DirEntry = {
   isFile: boolean
 }
 
+function filterNotebookEntries(entries: DirEntry[]) {
+  return entries.filter(e => e.name.toLowerCase() !== '.ds_store')
+}
+
 type ClipboardItem = {
   type: string
   content?: string
@@ -234,7 +238,8 @@ export const useNoteFilesStore = create<NoteFilesState>()((set, get) => ({
     try {
       const res = await window.electronAPI.listDir(dirPath)
       if (res && res.success) {
-        set({ tree: res.data || [], isLoading: false })
+        const data = Array.isArray(res.data) ? (res.data as DirEntry[]) : []
+        set({ tree: filterNotebookEntries(data), isLoading: false })
       } else {
         set({ error: res?.error || '目录读取失败', isLoading: false })
       }
@@ -246,7 +251,10 @@ export const useNoteFilesStore = create<NoteFilesState>()((set, get) => ({
   listDirRaw: async (dir: string) => {
     try {
       const res = await window.electronAPI.listDir(dir)
-      if (res && res.success) return res.data || []
+      if (res && res.success) {
+        const data = Array.isArray(res.data) ? (res.data as DirEntry[]) : []
+        return filterNotebookEntries(data)
+      }
       return []
     } catch {
       return []

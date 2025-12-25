@@ -3,6 +3,9 @@ import { persist } from 'zustand/middleware';
 import { settingsApi, Setting } from '../api/settings';
 import { useToastStore } from './toast';
 
+const shouldLogSettings = () => import.meta.env.DEV && typeof localStorage !== 'undefined' && localStorage.getItem('xpaste_debug_settings') === '1';
+const logSettings = (...args: unknown[]) => { if (shouldLogSettings()) console.log(...args); };
+
 // 预定义的设置键
 export const SETTING_KEYS = {
   // 用户设置
@@ -147,11 +150,11 @@ export const useSettingsStore = create<SettingsState>()((
       
       // 获取设置
       fetchSettings: async (category?: string) => {
-        console.log('开始获取设置...', { category });
+        logSettings('开始获取设置...', { category });
         set({ isLoading: true, error: null });
         try {
           const settings = await settingsApi.getUserSettings(category);
-          console.log('API返回的设置:', settings);
+          logSettings('API返回的设置:', settings);
           const settingsMap = (settings || []).reduce((acc, setting) => {
             acc[setting.key] = setting;
             return acc;
@@ -164,7 +167,7 @@ export const useSettingsStore = create<SettingsState>()((
             const localVal = prevVal && String(prevVal).length > 0 ? String(prevVal) : readLocalOnlySettingValue(k);
             if (localVal && localVal.length > 0) settingsMap[k] = createLocalSetting(k, localVal);
           }
-          console.log('设置映射:', settingsMap);
+          logSettings('设置映射:', settingsMap);
           
           set({ settings: settingsMap, isLoading: false });
         } catch (error) {
@@ -179,7 +182,7 @@ export const useSettingsStore = create<SettingsState>()((
       getSetting: ((key: string, defaultValue?: unknown) => {
         const { settings } = get();
         const setting = settings[key];
-        console.log(`获取设置 ${key}:`, {
+        logSettings(`获取设置 ${key}:`, {
           found: !!setting,
           setting: setting,
           defaultValue: defaultValue,
@@ -225,7 +228,7 @@ export const useSettingsStore = create<SettingsState>()((
             convertedValue = raw;
           }
         }
-        console.log(`设置 ${key} 转换后的值:`, convertedValue);
+        logSettings(`设置 ${key} 转换后的值:`, convertedValue);
         return convertedValue;
       }) as GetSetting,
       
