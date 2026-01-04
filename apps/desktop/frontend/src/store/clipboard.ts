@@ -61,7 +61,7 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
   error: null,
   isMonitoring: false,
   page: 1,
-  pageSize: 50, // 每页加载50条
+  pageSize: 20,
   hasMore: true,
   isLoadingMore: false,
   loadMoreError: null,
@@ -86,7 +86,8 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
 
   fetchItems: async (signal?: AbortSignal) => {
     const currentSeq = ++fetchSeq;
-    set({ isLoading: true, error: null, page: 1, hasMore: true });
+    const prevState = get();
+    set({ isLoading: true, error: null });
     console.log('剪贴板Store: 开始获取第一页剪贴板历史...');
     
     try {
@@ -108,15 +109,16 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
           hasMore: items.length === get().pageSize,
         });
       } else {
-        set({ error: response.message, isLoading: false, hasMore: false });
-        useToastStore.getState().showError('获取剪贴板历史失败', response.message);
+        set({ error: response.message, isLoading: false, page: prevState.page, hasMore: prevState.hasMore });
+        if (prevState.items.length === 0) {
+          useToastStore.getState().showError('获取剪贴板历史失败', response.message);
+        }
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '获取剪贴板历史失败';
+      const rawMessage = error instanceof Error ? error.message : '获取剪贴板历史失败';
+      const errorMessage = rawMessage === 'Failed to fetch' ? '网络连接失败' : rawMessage;
       
-      // 在React严格模式下，组件会重新挂载，导致之前的请求被取消。
-      // 这种取消是预期的，不应被视为错误。
-      if (error instanceof Error && (error.name === 'AbortError' || errorMessage.includes('请求超时或被取消'))) {
+      if (error instanceof Error && (error.name === 'AbortError' || rawMessage === '请求已取消')) {
         console.log('剪贴板Store: 获取剪贴板的请求被取消，这在开发模式下是正常行为。');
         if (currentSeq === fetchSeq) {
           set({ isLoading: false });
@@ -128,10 +130,10 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
         return;
       }
       
-      set({ error: errorMessage, isLoading: false, hasMore: false });
+      set({ error: errorMessage, isLoading: false, page: prevState.page, hasMore: prevState.hasMore });
       
       // 仅在没有数据时显示错误
-      if (get().items.length === 0) {
+      if (prevState.items.length === 0) {
         useToastStore.getState().showError('获取剪贴板历史失败', errorMessage);
       }
     }

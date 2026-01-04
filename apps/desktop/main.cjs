@@ -1196,6 +1196,13 @@ app.whenReady().then(() => {
     flushPendingQueue();
   });
 
+  ipcMain.handle('get-auth-token', async () => {
+    return {
+      token: authToken || null,
+      apiBaseUrl: apiBaseUrl || null,
+    };
+  });
+
   // 监听服务器配置同步（例如 API 基地址）
   ipcMain.on('sync-server-config', (event, config) => {
     try {

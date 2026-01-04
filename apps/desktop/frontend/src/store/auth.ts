@@ -97,7 +97,7 @@ export const useAuthStore = create<AuthState>()(
           const response = await apiClient.get<{success: boolean; message: string; data: User}>('/auth/profile');
           if (response.success) {
             // token有效，更新用户信息
-            set({ user: response.data });
+            set({ user: response.data, isAuthenticated: true });
             return true;
           } else {
             // token无效，清除认证状态
@@ -266,6 +266,7 @@ export const useAuthStore = create<AuthState>()(
           currentDevice: null,
           devices: [],
           token: null,
+          refreshToken: null,
           error: null,
         });
       },
@@ -364,8 +365,8 @@ export const useAuthStore = create<AuthState>()(
             useToastStore.getState().showError('获取设备列表失败', response.message);
           }
         } catch (error) {
-          if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('请求超时或被取消'))) {
-            console.log('设备Store: 请求被取消或超时，此为预期行为，不视为错误。');
+          if (error instanceof Error && (error.name === 'AbortError' || error.message === '请求已取消')) {
+            console.log('设备Store: 请求被取消，此为预期行为，不视为错误。');
             set({ isLoading: false });
             return;
           }
@@ -385,7 +386,7 @@ export const useAuthStore = create<AuthState>()(
             error.message.includes('Failed to fetch') ||
             error.message.includes('NetworkError') ||
             error.message.includes('ERR_NETWORK') ||
-            error.message.includes('请求超时或被取消')
+            error.message.includes('请求超时')
           );
           
           if (isNetworkError) {

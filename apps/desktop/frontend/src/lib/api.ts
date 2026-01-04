@@ -136,6 +136,7 @@ class ApiClient {
     extra?: RequestExtra
   ): Promise<T> {
     const url = `${this.getBaseURL()}${endpoint}`;
+    const isDev = !!import.meta.env?.DEV;
     const headersObj: Record<string, string> = {};
     if (options.headers) {
       const hs = new Headers(options.headers);
@@ -151,17 +152,28 @@ class ApiClient {
       headersObj.Authorization = `Bearer ${this.token}`;
     }
 
-    const { signal, ...restOptions } = options;
+    const { signal: originalSignal, ...restOptions } = options;
     const fetchOptions: RequestInit = { ...restOptions, headers: headersObj };
 
-    let timeoutId: NodeJS.Timeout | null = null;
+    const controller = new AbortController();
+    fetchOptions.signal = controller.signal;
 
-    if (signal instanceof AbortSignal) {
-      fetchOptions.signal = signal;
-    } else {
-      const controller = new AbortController();
-      fetchOptions.signal = controller.signal;
-      timeoutId = setTimeout(() => controller.abort(), 10000); // 10-second timeout
+    let timeoutId: NodeJS.Timeout | null = null;
+    let abortListener: (() => void) | null = null;
+    let didTimeout = false;
+
+    timeoutId = setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+    }, 60000);
+
+    if (originalSignal instanceof AbortSignal) {
+      if (originalSignal.aborted) {
+        controller.abort();
+      } else {
+        abortListener = () => controller.abort();
+        originalSignal.addEventListener('abort', abortListener, { once: true });
+      }
     }
 
     try {
@@ -170,8 +182,19 @@ class ApiClient {
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
+      if (abortListener && originalSignal instanceof AbortSignal) {
+        originalSignal.removeEventListener('abort', abortListener);
+      }
 
       if (!response.ok) {
+        if (isDev && endpoint.startsWith('/clips')) {
+          console.warn('API请求失败:', {
+            url,
+            status: response.status,
+            statusText: response.statusText,
+            hasToken: !!this.token,
+          });
+        }
         if (extra?.allowStatuses && extra.allowStatuses.includes(response.status)) {
           return response.json();
         }
@@ -258,8 +281,18 @@ class ApiClient {
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
+      if (abortListener && originalSignal instanceof AbortSignal) {
+        originalSignal.removeEventListener('abort', abortListener);
+      }
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error('请求超时或被取消');
+        if (didTimeout) {
+          throw new Error('请求超时');
+        }
+        throw new Error('请求已取消');
+      }
+      if (isDev && endpoint.startsWith('/clips')) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn('API请求异常:', { url, hasToken: !!this.token, message });
       }
       throw error;
     }
@@ -368,6 +401,8 @@ class ApiClient {
     const query = new URLSearchParams({
       page: String(params.page),
       limit: String(params.pageSize),
+      sort: 'created_at',
+      order: 'desc',
     }).toString();
     return this.request<{
       success: boolean;

@@ -323,9 +323,10 @@ export const Settings: React.FC = () => {
     // 只有在已认证的情况下才获取设置
     if (isAuthenticated) {
       console.log('用户已认证，刷新API token并获取设置...');
-      // 刷新API客户端的token
       import('../lib/api').then(({ apiClient }) => {
-        apiClient.refreshToken();
+        const authState = useAuthStore.getState();
+        apiClient.setToken(authState.token || '');
+        apiClient.setRefreshToken(authState.refreshToken || '');
         fetchSettings();
       });
     } else {

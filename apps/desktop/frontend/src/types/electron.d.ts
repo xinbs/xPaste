@@ -2,6 +2,7 @@ export interface ElectronAPI {
   getAppVersion: () => Promise<string>;
   getPlatform: () => Promise<string>;
   isDevelopment: () => Promise<boolean>;
+  getAuthToken: () => Promise<{ token?: string | null; apiBaseUrl?: string | null }>;
   showSaveDialog: (options: Record<string, unknown>) => Promise<{ canceled?: boolean; filePath?: string }>;
   showOpenDialog: (options: Record<string, unknown>) => Promise<{ canceled?: boolean; filePaths?: string[] }>;
   openSettingsWindow: () => Promise<void>;

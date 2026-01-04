@@ -61,7 +61,8 @@ export default function Dashboard() {
     clearError,
     hasMore,
     isLoadingMore,
-    loadMoreItems 
+    loadMoreItems,
+    scheduleRefresh,
   } = useClipboardStore();
   const { onlineDevices } = useWebSocketStore();
 
@@ -76,6 +77,22 @@ export default function Dashboard() {
   useEffect(() => {
     tokenRef.current = token;
   }, [token]);
+
+  const prevActiveTabRef = useRef<TabKey>(activeTab);
+
+  const refreshClipboard = useCallback(
+    (reason?: string) => {
+      const authState = useAuthStore.getState();
+      if (authState?.token) {
+        apiClient.setToken(authState.token);
+      }
+      if (authState?.refreshToken) {
+        apiClient.setRefreshToken(authState.refreshToken);
+      }
+      scheduleRefresh(reason);
+    },
+    [scheduleRefresh]
+  );
 
   // 专门处理 Token 同步和监听的 useEffect
   useEffect(() => {
@@ -214,7 +231,7 @@ export default function Dashboard() {
       } catch (error) {
         const message =
           error instanceof Error ? error.message : '搜索失败';
-        if (message === '请求超时或被取消') {
+        if (message === '请求已取消') {
           return;
         }
         useToastStore.getState().showError('搜索失败', message);
@@ -280,6 +297,15 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    const prev = prevActiveTabRef.current;
+    prevActiveTabRef.current = activeTab;
+    if (activeTab !== 'clipboard') return;
+    if (prev === 'clipboard') return;
+    if (searchQuery.trim()) return;
+    refreshClipboard('tab_enter');
+  }, [activeTab, searchQuery, refreshClipboard]);
+
+  useEffect(() => {
     console.log('Dashboard: useEffect 开始执行...');
     let isMounted = true;
     let timeoutId: NodeJS.Timeout;
@@ -333,7 +359,7 @@ export default function Dashboard() {
           useClipboardStore.getState().fetchItems(clipItemsController.signal).then(() => {
             console.log('Dashboard: Clip items fetched successfully');
           }).catch(error => {
-            if (error instanceof Error && error.name !== 'AbortError') {
+            if (error instanceof Error && error.name !== 'AbortError' && error.message !== '请求已取消') {
               console.error('Failed to fetch clip items:', error);
             }
           })
@@ -343,7 +369,7 @@ export default function Dashboard() {
       if (isMounted && !devicesController.signal.aborted) {
         promises.push(
           useAuthStore.getState().fetchDevices(devicesController.signal).catch(error => {
-            if (error instanceof Error && error.name !== 'AbortError') {
+            if (error instanceof Error && error.name !== 'AbortError' && error.message !== '请求已取消') {
               console.error('Failed to fetch devices:', error);
             }
           })
@@ -547,6 +573,18 @@ export default function Dashboard() {
                 <option value="image">图片</option>
                 <option value="file">文件</option>
               </select>
+            <button
+              onClick={() => refreshClipboard('manual')}
+              disabled={clipboardLoading || isUsingSearch}
+              className={cn(
+                "px-2 py-1 border border-gray-300 rounded text-xs hover:bg-gray-100 flex items-center space-x-1",
+                (clipboardLoading || isUsingSearch) && "opacity-50 cursor-not-allowed"
+              )}
+              title={isUsingSearch ? '搜索模式下不刷新历史列表' : '刷新历史列表'}
+            >
+              <RefreshCw className={cn("w-3 h-3", clipboardLoading && "animate-spin")} />
+              <span className="hidden sm:inline">刷新</span>
+            </button>
           </div>
           {isUsingSearch && (
             <div className="mt-1 flex items-center justify-between text-[11px] text-gray-500">
@@ -566,12 +604,20 @@ export default function Dashboard() {
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <div className="flex items-center justify-between">
               <p className="text-red-700 text-sm">{clipError}</p>
-              <button
-                onClick={clearError}
-                className="text-red-500 hover:text-red-700"
-              >
-                ×
-              </button>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => refreshClipboard('error_retry')}
+                  className="px-2 py-0.5 border border-red-200 rounded text-xs text-red-600 hover:bg-red-100"
+                >
+                  重试
+                </button>
+                <button
+                  onClick={clearError}
+                  className="text-red-500 hover:text-red-700"
+                >
+                  ×
+                </button>
+              </div>
             </div>
           </div>
         )}

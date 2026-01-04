@@ -28,10 +28,30 @@ export default function App() {
       if (!isFirstRun.current) return;
       isFirstRun.current = false;
 
-      // 如果有token，验证其有效性
-      // 注意：这里读取的是组件挂载时的 isAuthenticated 状态
-      // 如果是刷新页面，useAuthStore 会从 localStorage 恢复状态，isAuthenticated 可能为 true
-      if (useAuthStore.getState().isAuthenticated) {
+      const tryGetMainToken = async (): Promise<string | null> => {
+        if (!window.electronAPI?.getAuthToken) return null;
+        try {
+          const res = await window.electronAPI.getAuthToken();
+          const token = typeof res?.token === 'string' ? res.token : null;
+          return token && token.trim().length > 0 ? token.trim() : null;
+        } catch {
+          return null;
+        }
+      };
+
+      const mainToken = await tryGetMainToken();
+      const storeToken = useAuthStore.getState().token;
+
+      if (storeToken && mainToken && storeToken !== mainToken) {
+        const ok = await useAuthStore.getState().validateToken();
+        if (!ok) {
+          useAuthStore.setState({ token: mainToken, refreshToken: null });
+        }
+      } else if (!storeToken && mainToken) {
+        useAuthStore.setState({ token: mainToken, refreshToken: null });
+      }
+
+      if (useAuthStore.getState().token) {
         console.log('应用启动，验证Token有效性...');
         const tokenValid = await useAuthStore.getState().validateToken();
         

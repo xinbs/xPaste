@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // 发送日志到主进程
   log: (message, data) => ipcRenderer.send('renderer-log', message, data),
+  getAuthToken: () => ipcRenderer.invoke('get-auth-token'),
   syncToken: (token) => ipcRenderer.send('sync-token', token),
   onRequestToken: (callback) => {
     // 先移除所有监听器，确保只注册一个
