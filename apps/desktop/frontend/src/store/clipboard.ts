@@ -26,6 +26,7 @@ interface ClipboardState {
   pageSize: number;
   hasMore: boolean;
   isLoadingMore: boolean;
+  loadMoreError: string | null;
 
   // Actions
   fetchItems: (signal?: AbortSignal) => Promise<void>;
@@ -39,6 +40,7 @@ interface ClipboardState {
   uploadFile: (file: File) => Promise<boolean>;
   broadcastClipboardChange: (data: unknown) => void;
   handleRemoteClipboardUpdate: (data: unknown) => void;
+  scheduleRefresh: (reason?: string) => void;
 }
 
 // 剪贴板监控相关
@@ -49,6 +51,9 @@ let clipboardIpcHandler: ((event: unknown, data: unknown) => void) | null = null
 let lastClipboardFileHash = '';
 let lastFileAt = 0;
 const FILE_DUP_TTL_MS = 8000;
+let fetchSeq = 0;
+let refreshTimeout: NodeJS.Timeout | null = null;
+let refreshAbortController: AbortController | null = null;
 
 export const useClipboardStore = create<ClipboardState>()((set, get) => ({
   items: [],
@@ -56,11 +61,31 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
   error: null,
   isMonitoring: false,
   page: 1,
-  pageSize: 20, // 每页加载20条
+  pageSize: 50, // 每页加载50条
   hasMore: true,
   isLoadingMore: false,
+  loadMoreError: null,
+  scheduleRefresh: (reason?: string) => {
+    void reason;
+    if (refreshTimeout) {
+      clearTimeout(refreshTimeout);
+    }
+    if (refreshAbortController) {
+      try {
+        refreshAbortController.abort();
+      } catch {
+        void 0;
+      }
+    }
+    refreshTimeout = setTimeout(() => {
+      const controller = new AbortController();
+      refreshAbortController = controller;
+      void get().fetchItems(controller.signal);
+    }, 300);
+  },
 
   fetchItems: async (signal?: AbortSignal) => {
+    const currentSeq = ++fetchSeq;
     set({ isLoading: true, error: null, page: 1, hasMore: true });
     console.log('剪贴板Store: 开始获取第一页剪贴板历史...');
     
@@ -69,6 +94,10 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
         { page: 1, pageSize: get().pageSize },
         signal
       );
+      
+      if (currentSeq !== fetchSeq) {
+        return;
+      }
       
       if (response.success) {
         const items = response.data.items || [];
@@ -89,7 +118,13 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
       // 这种取消是预期的，不应被视为错误。
       if (error instanceof Error && (error.name === 'AbortError' || errorMessage.includes('请求超时或被取消'))) {
         console.log('剪贴板Store: 获取剪贴板的请求被取消，这在开发模式下是正常行为。');
-        set({ isLoading: false }); // 确保UI状态正确
+        if (currentSeq === fetchSeq) {
+          set({ isLoading: false });
+        }
+        return;
+      }
+      
+      if (currentSeq !== fetchSeq) {
         return;
       }
       
@@ -108,7 +143,7 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
       return;
     }
 
-    set({ isLoadingMore: true });
+    set({ isLoadingMore: true, loadMoreError: null });
     const nextPage = page + 1;
     console.log(`剪贴板Store: 开始加载第 ${nextPage} 页...`);
 
@@ -129,14 +164,14 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
           page: nextPage,
           hasMore: newItems.length === state.pageSize,
           isLoadingMore: false,
+          loadMoreError: null,
         }));
       } else {
-        set({ error: response.message, isLoadingMore: false, hasMore: false });
-        // 加载更多失败时，不一定要弹窗，可以在UI上给提示
+        set({ loadMoreError: response.message || '加载更多失败', isLoadingMore: false });
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '加载更多失败';
-      set({ error: errorMessage, isLoadingMore: false, hasMore: false });
+      set({ loadMoreError: errorMessage, isLoadingMore: false });
     }
   },
 
@@ -155,15 +190,12 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
       });
       
       if (response.success) {
-          // 重新获取列表以确保数据同步
           try {
-            await get().fetchItems();
+            get().scheduleRefresh('addItem_success');
           } catch (fetchError) {
-            // 如果重新获取失败，不影响添加操作的成功状态
-            console.warn('Failed to refresh items after adding:', fetchError);
+            console.warn('Failed to schedule refresh after adding:', fetchError);
           }
           
-          // 广播到其他设备
           get().broadcastClipboardChange(response.data);
           
           return true;
@@ -252,7 +284,11 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
                 lastClipboardImageHash = '';
             }
             
-            get().fetchItems();
+            try {
+              get().scheduleRefresh('ipc_savedByMain');
+            } catch (error) {
+              console.warn('Failed to schedule refresh after IPC savedByMain:', error);
+            }
             return;
         }
 
@@ -480,14 +516,18 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
     set({ isMonitoring: false });
   },
 
-  clearError: () => set({ error: null }),
+  clearError: () => set({ error: null, loadMoreError: null }),
 
   uploadFile: async (file: File) => {
     set({ isLoading: true, error: null });
     try {
       const response = await apiClient.uploadFile(file);
       if (response.success) {
-        await get().fetchItems();
+        try {
+          get().scheduleRefresh('uploadFile_success');
+        } catch (error) {
+          console.warn('Failed to schedule refresh after upload:', error);
+        }
         return true;
       } else {
         set({ error: response.message, isLoading: false });
@@ -531,7 +571,6 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
     const contentType = typeof payload.content_type === 'string' ? payload.content_type : ''
     const resolvedType = typeFromPayload || contentType
     if (!resolvedType) return
-      const { items } = get();
       const id = (typeof payload.id === 'string' || typeof payload.id === 'number') ? String(payload.id) : Date.now().toString()
       const created_at = typeof payload.created_at === 'string' ? payload.created_at : new Date().toISOString()
       const updated_at = typeof payload.updated_at === 'string' ? payload.updated_at : new Date().toISOString()
@@ -548,25 +587,27 @@ export const useClipboardStore = create<ClipboardState>()((set, get) => ({
         device_name: typeof payload.device_name === 'string' ? payload.device_name : undefined,
       };
       
-      // 检查是否已存在相同的项目
-      const existingIndex = items.findIndex(item => item.id === newItem.id);
-      if (existingIndex === -1) {
-        set({ items: [newItem, ...items] });
-        return
-      }
-
-      const parseMs = (t: string) => {
-        const ms = Date.parse(t)
-        return Number.isFinite(ms) ? ms : 0
-      }
-      const localUpdated = parseMs(items[existingIndex].updated_at)
-      const incomingUpdated = parseMs(newItem.updated_at)
-      if (incomingUpdated > localUpdated) {
-        const nextItems = [...items]
-        nextItems.splice(existingIndex, 1)
-        nextItems.unshift(newItem)
-        set({ items: nextItems })
-      }
+      set((state) => {
+        const items = state.items;
+        const existingIndex = items.findIndex(item => item.id === newItem.id);
+        if (existingIndex === -1) {
+          return { items: [newItem, ...items] };
+        }
+        
+        const parseMs = (t: string) => {
+          const ms = Date.parse(t)
+          return Number.isFinite(ms) ? ms : 0
+        }
+        const localUpdated = parseMs(items[existingIndex].updated_at)
+        const incomingUpdated = parseMs(newItem.updated_at)
+        if (incomingUpdated > localUpdated) {
+          const nextItems = [...items]
+          nextItems.splice(existingIndex, 1)
+          nextItems.unshift(newItem)
+          return { items: nextItems }
+        }
+        return state;
+      });
   },
 }));
 

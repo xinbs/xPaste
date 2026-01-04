@@ -54,6 +54,7 @@ export default function Dashboard() {
     copyToClipboard,
     isLoading: clipboardLoading,
     error: clipError,
+    loadMoreError,
     isMonitoring,
     startMonitoring,
     stopMonitoring,
@@ -390,7 +391,7 @@ export default function Dashboard() {
     if (activeTab !== 'clipboard') return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (!entries[0].isIntersecting) return;
+        if (!entries[0] || !entries[0].isIntersecting) return;
         const trimmed = searchQuery.trim();
         if (trimmed) {
           if (searchHasMore && !searchLoadingMore && !isSearching) {
@@ -405,7 +406,8 @@ export default function Dashboard() {
       },
       {
         root: clipboardScrollRef.current,
-        threshold: 1.0,
+        threshold: 0,
+        rootMargin: '0px 0px 300px 0px',
       }
     );
 
@@ -539,13 +541,24 @@ export default function Dashboard() {
                 }
               }}
               className="px-2 py-1 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="all">全部</option>
-              <option value="text">文本</option>
-              <option value="image">图片</option>
-              <option value="file">文件</option>
-            </select>
+              >
+                <option value="all">全部</option>
+                <option value="text">文本</option>
+                <option value="image">图片</option>
+                <option value="file">文件</option>
+              </select>
           </div>
+          {isUsingSearch && (
+            <div className="mt-1 flex items-center justify-between text-[11px] text-gray-500">
+              <span>当前为搜索结果，仅显示匹配项，新记录不会自动出现在这里。</span>
+              <button
+                onClick={() => setSearchQuery('')}
+                className="ml-2 px-2 py-0.5 border border-gray-300 rounded hover:bg-gray-100 text-xs"
+              >
+                清空搜索
+              </button>
+            </div>
+          )}
         </div>
 
         {/* 错误提示 */}
@@ -726,9 +739,36 @@ export default function Dashboard() {
             </div>
           )}
 
-          {(isUsingSearch ? searchHasMore : hasMore) && <div ref={clipboardSentinelRef} style={{ height: "1px" }} />}
+          {(isUsingSearch ? searchHasMore : hasMore) && (
+            <div ref={clipboardSentinelRef} style={{ height: "24px" }} />
+          )}
 
-          {(isUsingSearch ? searchLoadingMore : clipboardLoading) && filteredClipItems.length > 0 && (
+          {!isUsingSearch && loadMoreError && (
+            <div className="flex items-center justify-center py-2 text-xs text-red-500">
+              <span className="mr-2">{loadMoreError}</span>
+              <button
+                onClick={() => {
+                  loadMoreItems();
+                }}
+                className="px-2 py-0.5 border border-red-300 rounded hover:bg-red-50"
+              >
+                重试加载
+              </button>
+            </div>
+          )}
+
+          {!isUsingSearch && hasMore && !isLoadingMore && filteredClipItems.length > 0 && (
+            <div className="flex items-center justify-center py-2">
+              <button
+                onClick={() => loadMoreItems()}
+                className="px-3 py-1 border border-gray-300 rounded text-xs hover:bg-gray-100"
+              >
+                加载更多
+              </button>
+            </div>
+          )}
+
+          {(isUsingSearch ? searchLoadingMore : isLoadingMore) && filteredClipItems.length > 0 && (
              <div className="flex items-center justify-center py-4">
                 <RefreshCw className="w-5 h-5 animate-spin text-blue-500" />
              </div>
