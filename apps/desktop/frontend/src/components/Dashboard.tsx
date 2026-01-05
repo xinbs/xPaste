@@ -14,6 +14,7 @@ import { useToastStore } from '@/store/toast';
 import { useSettingsStore, SETTING_KEYS } from '@/store/settings';
 import apiClient from '@/lib/api';
 
+import { Virtuoso } from 'react-virtuoso';
 import NotebookTab from '@/components/NotebookTab';
 
 const TAB_KEYS = ['clipboard', 'quickadd', 'devices', 'notebook', 'settings'] as const;
@@ -623,16 +624,16 @@ export default function Dashboard() {
         )}
 
         {/* 主内容区域 */}
-        <div ref={clipboardScrollRef} className="flex-1 overflow-y-auto p-1 scrollbar-thin">
+        <div ref={clipboardScrollRef} className="flex-1 h-full overflow-hidden p-1">
           {(isUsingSearch ? isSearching : clipboardLoading) && filteredClipItems.length === 0 ? (
-            <div className="flex items-center justify-center h-32">
+            <div className="flex items-center justify-center h-full">
               <div className="text-center">
                 <RefreshCw className="w-6 h-6 animate-spin text-blue-500 mx-auto mb-1" />
                 <p className="text-gray-500 text-xs">加载中...</p>
               </div>
             </div>
           ) : filteredClipItems.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-32 text-gray-500">
+            <div className="flex flex-col items-center justify-center h-full text-gray-500">
               <div className="text-3xl mb-2">📋</div>
               <p className="text-sm font-medium mb-1">暂无记录</p>
               <p className="text-xs text-center">{searchQuery || typeFilter !== 'all' ? '没有匹配的记录' : '开始监控或添加内容'}</p>
@@ -642,11 +643,62 @@ export default function Dashboard() {
               </p>
             </div>
           ) : (
-            <div className="space-y-1">
-                {filteredClipItems.map((item) => {
+            <Virtuoso
+              style={{ height: '100%' }}
+              data={filteredClipItems}
+              endReached={() => {
+                if (isUsingSearch) {
+                  if (searchHasMore && !searchLoadingMore && !isSearching) {
+                    loadMoreSearchResults();
+                  }
+                } else {
+                  if (hasMore && !isLoadingMore && !clipboardLoading) {
+                    loadMoreItems();
+                  }
+                }
+              }}
+              components={{
+                Footer: () => {
+                  if (isUsingSearch ? searchLoadingMore : isLoadingMore) {
+                    return (
+                      <div className="flex items-center justify-center py-4">
+                        <RefreshCw className="w-5 h-5 animate-spin text-blue-500" />
+                      </div>
+                    );
+                  }
+                  if (!isUsingSearch && loadMoreError) {
+                    return (
+                      <div className="flex items-center justify-center py-2 text-xs text-red-500">
+                        <span className="mr-2">{loadMoreError}</span>
+                        <button
+                          onClick={() => loadMoreItems()}
+                          className="px-2 py-0.5 border border-red-300 rounded hover:bg-red-50"
+                        >
+                          重试加载
+                        </button>
+                      </div>
+                    );
+                  }
+                  if (!isUsingSearch && hasMore && !isLoadingMore) {
+                     return (
+                      <div className="flex items-center justify-center py-2">
+                        <button
+                          onClick={() => loadMoreItems()}
+                          className="px-3 py-1 border border-gray-300 rounded text-xs hover:bg-gray-100"
+                        >
+                          加载更多
+                        </button>
+                      </div>
+                     );
+                  }
+                  return <div style={{ height: '24px' }} />;
+                }
+              }}
+              itemContent={(index, item) => {
                   const metadata = item.metadata && typeof item.metadata === 'object' ? (item.metadata as Record<string, unknown>) : null
                   const imageSize = metadata && typeof metadata.size === 'number' ? metadata.size : null
                   return (
+                  <div className="pb-1 px-1">
                   <div key={item.id} className="bg-white rounded border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all duration-200 group">
                     <div className="p-2">
                       <div className="flex items-start justify-between">
@@ -691,9 +743,12 @@ export default function Dashboard() {
                               )}
                               {item.content && (
                                 <div className="relative inline-block">
+                                  {/* 使用 loading="lazy" 和 decoding="async" 优化图片渲染 */}
                                   <img 
                                     src={item.content} 
                                     alt="剪贴板图片" 
+                                    loading="lazy"
+                                    decoding="async"
                                     className="max-w-full max-h-16 object-contain rounded border cursor-pointer hover:opacity-80 transition-opacity"
                                     onClick={() => {
                                       // 在新窗口中打开完整图片
@@ -780,44 +835,10 @@ export default function Dashboard() {
                       </div>
                     </div>
                   </div>
+                  </div>
                   )
-                })}
-            </div>
-          )}
-
-          {(isUsingSearch ? searchHasMore : hasMore) && (
-            <div ref={clipboardSentinelRef} style={{ height: "24px" }} />
-          )}
-
-          {!isUsingSearch && loadMoreError && (
-            <div className="flex items-center justify-center py-2 text-xs text-red-500">
-              <span className="mr-2">{loadMoreError}</span>
-              <button
-                onClick={() => {
-                  loadMoreItems();
-                }}
-                className="px-2 py-0.5 border border-red-300 rounded hover:bg-red-50"
-              >
-                重试加载
-              </button>
-            </div>
-          )}
-
-          {!isUsingSearch && hasMore && !isLoadingMore && filteredClipItems.length > 0 && (
-            <div className="flex items-center justify-center py-2">
-              <button
-                onClick={() => loadMoreItems()}
-                className="px-3 py-1 border border-gray-300 rounded text-xs hover:bg-gray-100"
-              >
-                加载更多
-              </button>
-            </div>
-          )}
-
-          {(isUsingSearch ? searchLoadingMore : isLoadingMore) && filteredClipItems.length > 0 && (
-             <div className="flex items-center justify-center py-4">
-                <RefreshCw className="w-5 h-5 animate-spin text-blue-500" />
-             </div>
+              }}
+            />
           )}
         </div>
       </div>
