@@ -61,8 +61,13 @@ if (Test-Path $outDir) {
 # 构建前端资源（跳过 tsc 类型检查以加快速度）
 Write-Host "[2/4] Build frontend (Vite)..." -ForegroundColor Cyan
 pushd "$scriptRoot\frontend" | Out-Null
-if (-not (Test-Path node_modules)) {
-  Write-Host "frontend/node_modules not found, installing deps..." -ForegroundColor Yellow
+$needInstall = -not (Test-Path node_modules)
+if (-not $needInstall) {
+  node -e "require.resolve('react-virtuoso')" 2>$null
+  if ($LASTEXITCODE -ne 0) { $needInstall = $true }
+}
+if ($needInstall) {
+  Write-Host "frontend deps missing/outdated, installing..." -ForegroundColor Yellow
   pnpm install
 }
 ../node_modules/.bin/vite build
