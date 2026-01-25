@@ -9,9 +9,18 @@ const devServerUrlEnv = process.env.DESKTOP_DEV_SERVER_URL || process.env.VITE_D
 const devServerUrl = devServerUrlEnv || 'http://localhost:5173';
 // 关闭按钮行为：'minimize' | 'hide' | 'quit'
 let userCloseBehavior = 'minimize';
+const AUTO_LAUNCH_ARG = '--auto-launch';
+const APP_USER_MODEL_ID = 'com.xpaste.app';
+let isAutoLaunchStart = false;
 // Token 存储模式：默认磁盘，可通过环境变量切换为内存
 // 可选值：'disk' | 'memory'
 const TOKEN_STORAGE_MODE = (process.env.TOKEN_STORAGE || 'disk').toLowerCase();
+
+if (process.platform === 'win32') {
+  try {
+    app.setAppUserModelId(APP_USER_MODEL_ID);
+  } catch {}
+}
 
 // Token 持久化相关逻辑
 const TOKEN_FILE_NAME = 'auth-token.json';
@@ -89,6 +98,31 @@ function saveWindowStateFrom(win) {
     const p = getWindowStatePath();
     fs.writeFileSync(p, JSON.stringify(data));
   } catch {}
+}
+
+function getAutoLaunchOptions() {
+  if (process.platform === 'win32') {
+    return { path: app.getPath('exe'), args: [AUTO_LAUNCH_ARG] };
+  }
+  return {};
+}
+
+function getAutoLaunchStatus() {
+  const settings = app.getLoginItemSettings(getAutoLaunchOptions());
+  let enabled = !!settings.openAtLogin;
+  if (!enabled && process.platform === 'win32') {
+    const items = Array.isArray(settings.launchItems) ? settings.launchItems : [];
+    if (items.length > 0) {
+      enabled = items.some((item) => {
+        const args = Array.isArray(item?.args) ? item.args : [];
+        return args.includes(AUTO_LAUNCH_ARG);
+      });
+    }
+    if (!enabled && typeof settings.executableWillLaunchAtLogin === 'boolean') {
+      enabled = settings.executableWillLaunchAtLogin;
+    }
+  }
+  return { enabled, settings };
 }
 
 // 跨平台图标路径获取函数
@@ -567,7 +601,7 @@ function createWindow() {
       backgroundThrottling: false
     },
     icon: getWindowIcon(),
-    show: true,
+    show: !isAutoLaunchStart,
     // 根据环境模式设置窗口样式
     frame: isDev,  // 只在开发模式显示完整框架
     titleBarStyle: process.platform === 'darwin' 
@@ -747,11 +781,20 @@ function createWindow() {
 
   // 窗口准备好后显示（show:true 已提前显示，这里保证绘制完成后聚焦）
   mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
-    
-    // 如果是开发模式，聚焦到窗口
-    if (isDev) {
-      mainWindow.focus();
+    if (isAutoLaunchStart) {
+      if (process.platform === 'darwin') {
+        try { mainWindow.hide(); } catch (_) {}
+        try { app.dock.hide(); } catch (_) {}
+      } else {
+        try { mainWindow.minimize(); } catch (_) {}
+        try { mainWindow.hide(); } catch (_) {}
+      }
+    } else {
+      mainWindow.show();
+      // 如果是开发模式，聚焦到窗口
+      if (isDev) {
+        mainWindow.focus();
+      }
     }
 
     // 向渲染进程请求当前服务器配置，确保主进程握手后持有最新 API 地址
@@ -1221,6 +1264,14 @@ app.whenReady().then(() => {
     }
   });
 
+  try {
+    const loginSettings = app.getLoginItemSettings();
+    const argvAuto = process.argv.includes(AUTO_LAUNCH_ARG);
+    isAutoLaunchStart = !!loginSettings?.wasOpenedAtLogin || !!loginSettings?.wasOpenedAsHidden || argvAuto;
+  } catch {
+    isAutoLaunchStart = process.argv.includes(AUTO_LAUNCH_ARG);
+  }
+
   createWindow();
   createTray();
 
@@ -1476,6 +1527,30 @@ ipcMain.handle('update-close-behavior', (event, behavior) => {
     return { success: true };
   } catch (err) {
     return { success: false, error: err?.message || '更新关闭行为失败' };
+  }
+});
+
+ipcMain.handle('get-auto-launch', () => {
+  try {
+    const status = getAutoLaunchStatus();
+    return { enabled: status.enabled };
+  } catch {
+    return { enabled: false };
+  }
+});
+
+ipcMain.handle('set-auto-launch', (event, payload) => {
+  try {
+    const enabled = !!payload?.enabled;
+    const options = { openAtLogin: enabled, ...getAutoLaunchOptions() };
+    if (process.platform === 'darwin') {
+      options.openAsHidden = true;
+    }
+    app.setLoginItemSettings(options);
+    const current = getAutoLaunchStatus();
+    return { success: true, enabled: current.enabled };
+  } catch (err) {
+    return { success: false, error: err?.message || '设置开机启动失败' };
   }
 });
 

@@ -73,6 +73,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   syncHotkeys: (hotkeys) => ipcRenderer.invoke('update-hotkeys', hotkeys),
   // 同步关闭行为到主进程
   syncCloseBehavior: (behavior) => ipcRenderer.invoke('update-close-behavior', behavior),
+  getAutoLaunchStatus: () => ipcRenderer.invoke('get-auto-launch'),
+  setAutoLaunch: (payload) => ipcRenderer.invoke('set-auto-launch', payload),
   quitApp: () => ipcRenderer.invoke('quit-app'),
   readTextFile: (filePath) => ipcRenderer.invoke('fs-read-text', filePath),
   writeTextFile: (filePath, content) => ipcRenderer.invoke('fs-write-text', filePath, content),

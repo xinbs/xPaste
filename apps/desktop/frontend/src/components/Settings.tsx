@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Settings as SettingsIcon, Save, Download, Upload, AlertCircle, CheckCircle, X, Server, Wifi, LogIn, Keyboard } from 'lucide-react';
 import { useSettingsStore, SETTING_KEYS, SETTING_GROUPS } from '../store/settings';
 import { useNoteFilesStore } from '../store/noteFiles';
@@ -167,6 +167,8 @@ export const Settings: React.FC = () => {
   const [serverUrl, setServerUrl] = useState('');
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [autoLaunchLoading, setAutoLaunchLoading] = useState(false);
+  const autoLaunchInitRef = useRef(false);
   const defaultHotkey = 'CmdOrCtrl+Shift+V';
   // 兼容后端将 JSON 以字符串返回的情况
   const safeParseJson = <T,>(val: unknown, fallback: T): T => {
@@ -357,6 +359,34 @@ export const Settings: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (autoLaunchInitRef.current) return;
+    autoLaunchInitRef.current = true;
+    if (!window.electronAPI || typeof window.electronAPI.getAutoLaunchStatus !== 'function') return;
+    setAutoLaunchLoading(true);
+    window.electronAPI.getAutoLaunchStatus()
+      .then((res) => {
+        if (typeof res?.enabled === 'boolean') {
+          return setSetting(SETTING_KEYS.USER_AUTO_LAUNCH, res.enabled);
+        }
+      })
+      .catch(() => void 0)
+      .finally(() => setAutoLaunchLoading(false));
+  }, [setSetting]);
+
+  const handleLocalSave = async (key: string, value: unknown) => {
+    setSaveStatus('saving');
+    try {
+      await setSetting(key, value);
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch (error) {
+      console.error('本地设置保存失败:', error);
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    }
+  };
+
   // 导出设置
   const handleExport = async () => {
     try {
@@ -473,6 +503,33 @@ export const Settings: React.FC = () => {
             { value: 'quit', label: '直接退出应用' }
           ]}
           disabled={isLoading}
+        />
+      </SettingItem>
+      <SettingItem
+        title="开机启动"
+        description="系统启动时自动运行 xPaste"
+      >
+        <Switch
+          checked={getSetting(SETTING_KEYS.USER_AUTO_LAUNCH, false)}
+          onChange={async (checked) => {
+            try {
+              if (window.electronAPI && typeof window.electronAPI.setAutoLaunch === 'function') {
+                setAutoLaunchLoading(true);
+                const res = await window.electronAPI.setAutoLaunch({ enabled: checked });
+                if (res?.success) {
+                  await handleLocalSave(SETTING_KEYS.USER_AUTO_LAUNCH, checked);
+                } else {
+                  setSaveStatus('error');
+                  setTimeout(() => setSaveStatus('idle'), 3000);
+                }
+              } else {
+                await handleLocalSave(SETTING_KEYS.USER_AUTO_LAUNCH, checked);
+              }
+            } finally {
+              setAutoLaunchLoading(false);
+            }
+          }}
+          disabled={isLoading || autoLaunchLoading}
         />
       </SettingItem>
 

@@ -21,6 +21,7 @@ export const SETTING_KEYS = {
   USER_HOTKEYS: 'user.hotkeys',
   USER_AUTO_CLEANUP: 'user.auto_cleanup',
   USER_CLEANUP_PERIOD: 'user.cleanup_period',
+  USER_AUTO_LAUNCH: 'user.auto_launch',
   // 窗口行为设置
   USER_CLOSE_BEHAVIOR: 'user.close_behavior',
   // 服务器设置
@@ -43,11 +44,13 @@ type GetSetting = {
 const LOCAL_ONLY_SETTING_KEYS = new Set<string>([
   SETTING_KEYS.NOTEBOOK_DEFAULT_DIR,
   SETTING_KEYS.NOTEBOOK_DEFAULT_FILE,
+  SETTING_KEYS.USER_AUTO_LAUNCH,
 ]);
 
 function localStorageKeyForSettingKey(key: string) {
   if (key === SETTING_KEYS.NOTEBOOK_DEFAULT_DIR) return 'xpaste-notebook-default-dir';
   if (key === SETTING_KEYS.NOTEBOOK_DEFAULT_FILE) return 'xpaste-notebook-default-file';
+  if (key === SETTING_KEYS.USER_AUTO_LAUNCH) return 'xpaste-user-auto-launch';
   return '';
 }
 
