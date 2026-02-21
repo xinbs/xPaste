@@ -31,6 +31,7 @@ export const SETTING_KEYS = {
   NOTEBOOK_DEFAULT_FILE: 'notebook.default_file',
   NOTEBOOK_SYNC_ENABLED: 'notebook.sync_enabled',
   NOTEBOOK_AUTO_SYNC_ON_REFRESH: 'notebook.auto_sync_on_refresh',
+  NOTEBOOK_AUTO_SYNC_ON_SAVE: 'notebook.auto_sync_on_save',
   NOTEBOOK_AUTO_SYNC_NOTES: 'notebook.auto_sync_notes',
   NOTEBOOK_AUTO_SYNC_ATTACHMENTS: 'notebook.auto_sync_attachments',
 } as const;

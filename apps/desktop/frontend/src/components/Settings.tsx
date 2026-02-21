@@ -931,6 +931,7 @@ export const Settings: React.FC = () => {
     const defaultFile = getSetting(SETTING_KEYS.NOTEBOOK_DEFAULT_FILE, '') as string
     const syncEnabled = getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
     const autoOnRefresh = getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_REFRESH, true) as boolean
+    const autoOnSave = getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_SAVE, false) as boolean
     const autoNotes = getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, true) as boolean
     const autoAtt = getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, false) as boolean
     const chooseDir = async () => {
@@ -995,6 +996,13 @@ export const Settings: React.FC = () => {
           <Switch
             checked={autoOnRefresh}
             onChange={(checked) => handleSave(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_REFRESH, checked)}
+            disabled={isLoading}
+          />
+        </SettingItem>
+        <SettingItem title="保存后自动同步" description="保存当前文件后自动同步到云端">
+          <Switch
+            checked={autoOnSave}
+            onChange={(checked) => handleSave(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_SAVE, checked)}
             disabled={isLoading}
           />
         </SettingItem>

@@ -1395,6 +1395,26 @@ export default function Dashboard() {
       })
       if (ok) {
         useToastStore.getState().showSuccess('已保存到记事本', '内容已追加到默认Markdown文件')
+        try {
+          const syncEnabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
+          const autoOnSave = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_SAVE, false) as boolean
+          if (syncEnabled && autoOnSave) {
+            const noteStore = useNoteFilesStore.getState()
+            const defaultFile = noteStore.getDefaultFile()
+            const root = noteStore.getDefaultDir()
+            if (defaultFile) {
+              const synced = await noteStore.syncNoteFile(defaultFile, root)
+              if (synced) {
+                const name = defaultFile.split(defaultFile.includes('\\') ? '\\' : '/').pop() || 'default.md'
+                useToastStore.getState().showSuccess('已同步到云端', name)
+              } else {
+                useToastStore.getState().showError('云端同步失败', '请检查网络或同步设置')
+              }
+            }
+          }
+        } catch (e) {
+          useToastStore.getState().showError('云端同步失败', e instanceof Error ? e.message : '未知错误')
+        }
       } else {
         useToastStore.getState().showError('保存失败', '请检查记事本默认目录/文件设置')
       }

@@ -1302,6 +1302,10 @@ app.on('window-all-closed', () => {
   }
 });
 
+app.on('before-quit', () => {
+  app.isQuiting = true;
+});
+
 // 在此文件中，你可以包含应用程序剩余的所有主进程代码。
 // 也可以拆分成几个文件，然后用require导入。
 
@@ -1373,6 +1377,7 @@ function createMenu() {
           label: '退出',
           accelerator: process.platform === 'darwin' ? 'Cmd+Q' : 'Ctrl+Q',
           click: () => {
+            app.isQuiting = true;
             app.quit();
           }
         }

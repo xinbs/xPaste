@@ -193,6 +193,7 @@ export default function NotebookTab() {
 
   const syncEnabledSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean)
   const autoOnRefreshSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_REFRESH, true) as boolean)
+  const autoOnSaveSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_SAVE, false) as boolean)
   const autoNotesSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_NOTES, true) as boolean)
   const autoAttSetting = useSettingsStore(s => s.getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ATTACHMENTS, false) as boolean)
   const autoSyncAllSetting = autoNotesSetting && autoAttSetting
@@ -1430,6 +1431,122 @@ export default function NotebookTab() {
     }
   }, [backupLocalFileIfExists, currentFile, getDefaultDir, quickSyncing, readFile])
 
+  const uploadCurrentFile = useCallback(async () => {
+    if (quickSyncing) return
+    if (!window.electronAPI) {
+      useToastStore.getState().showError('不可用', '请在桌面应用模式下使用同步')
+      return
+    }
+    if (!currentFile) {
+      useToastStore.getState().showError('上传失败', '未选择文件')
+      return
+    }
+    const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
+    if (!enabled) {
+      useToastStore.getState().showError('未开启云同步', '请在设置中开启')
+      return
+    }
+    const root = getDefaultDir()
+    if (!root) {
+      useToastStore.getState().showError('未设置目录', '请先选择记事本目录')
+      return
+    }
+    setQuickSyncing(true)
+    try {
+      const abs = currentFile
+      const dir = parentPath(abs)
+      const relDir = relativeDir(root, dir)
+      const name = abs.split(sepOf(abs)).pop() || ''
+      const relPath = (relDir ? `${relDir}/${name}` : name).replace(/\\/g, '/').replace(/^\/+/, '')
+      if (!relPath) {
+        setQuickSyncStatus({ state: 'error', atMs: Date.now(), message: '无法计算相对路径' })
+        useToastStore.getState().showError('上传失败', '无法计算相对路径')
+        return
+      }
+      setQuickSyncStatus({ state: 'syncing', atMs: Date.now(), relPath })
+      const readRes = await window.electronAPI.readBytesFile(abs)
+      if (!readRes?.success || !readRes.data) {
+        setQuickSyncStatus({ state: 'error', atMs: Date.now(), relPath, message: '读取本地文件失败' })
+        useToastStore.getState().showError('上传失败', '读取本地文件失败')
+        return
+      }
+      const blob = new Blob([u8ToArrayBuffer(readRes.data)], { type: 'application/octet-stream' })
+      const res = await apiClient.uploadCloudFile(blob, { path: relPath, mode: 'force', useData: true })
+      if (res && res.success) {
+        setQuickSyncStatus({ state: 'success', atMs: Date.now(), relPath })
+        useToastStore.getState().showSuccess('已上传到云端', relPath)
+      } else {
+        const msg = res?.message || '上传失败'
+        setQuickSyncStatus({ state: 'error', atMs: Date.now(), relPath, message: msg })
+        useToastStore.getState().showError('上传失败', msg)
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '未知错误'
+      setQuickSyncStatus({ state: 'error', atMs: Date.now(), message: msg })
+      useToastStore.getState().showError('上传失败', msg)
+    } finally {
+      setQuickSyncing(false)
+    }
+  }, [currentFile, getDefaultDir, quickSyncing])
+
+  const downloadCurrentFile = useCallback(async () => {
+    if (quickSyncing) return
+    if (!window.electronAPI) {
+      useToastStore.getState().showError('不可用', '请在桌面应用模式下使用同步')
+      return
+    }
+    if (!currentFile) {
+      useToastStore.getState().showError('下载失败', '未选择文件')
+      return
+    }
+    const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
+    if (!enabled) {
+      useToastStore.getState().showError('未开启云同步', '请在设置中开启')
+      return
+    }
+    const root = getDefaultDir()
+    if (!root) {
+      useToastStore.getState().showError('未设置目录', '请先选择记事本目录')
+      return
+    }
+    setQuickSyncing(true)
+    try {
+      const abs = currentFile
+      const dir = parentPath(abs)
+      const relDir = relativeDir(root, dir)
+      const name = abs.split(sepOf(abs)).pop() || ''
+      const relPath = (relDir ? `${relDir}/${name}` : name).replace(/\\/g, '/').replace(/^\/+/, '')
+      if (!relPath) {
+        setQuickSyncStatus({ state: 'error', atMs: Date.now(), message: '无法计算相对路径' })
+        useToastStore.getState().showError('下载失败', '无法计算相对路径')
+        return
+      }
+      setQuickSyncStatus({ state: 'syncing', atMs: Date.now(), relPath })
+      const dl = await apiClient.downloadCloudFile({ path: relPath, useData: true })
+      const bytes = new Uint8Array(dl.data)
+      await backupLocalFileIfExists(root, abs)
+      await window.electronAPI.ensureDir(parentPath(abs))
+      const w = await window.electronAPI.saveBytesFile(abs, bytes)
+      if (!w?.success) {
+        setQuickSyncStatus({ state: 'error', atMs: Date.now(), relPath, message: '写入本地失败' })
+        useToastStore.getState().showError('下载失败', '写入本地失败')
+        return
+      }
+      try {
+        const text = await readFile(abs)
+        setContent(text || '')
+      } catch { void 0 }
+      setQuickSyncStatus({ state: 'success', atMs: Date.now(), relPath })
+      useToastStore.getState().showSuccess('已下载到本地', relPath)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '未知错误'
+      setQuickSyncStatus({ state: 'error', atMs: Date.now(), message: msg })
+      useToastStore.getState().showError('下载失败', msg)
+    } finally {
+      setQuickSyncing(false)
+    }
+  }, [backupLocalFileIfExists, currentFile, getDefaultDir, quickSyncing, readFile])
+
   useEffect(() => {
     retryQuickSyncRef.current = () => { void quickSyncCurrentFile() }
   }, [quickSyncCurrentFile])
@@ -1509,7 +1626,8 @@ export default function NotebookTab() {
       useToastStore.getState().showSuccess('已保存', '内容已写入文件')
       try {
         const enabled = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_SYNC_ENABLED, false) as boolean
-        if (enabled && currentFile) {
+        const autoOnSave = useSettingsStore.getState().getSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_SAVE, false) as boolean
+        if (enabled && autoOnSave && currentFile) {
           const root = getDefaultDir()
           await useNoteFilesStore.getState().syncNoteFile(currentFile, root)
           const fileName = currentFile.split(sepOf(currentFile)).pop() || 'note.md'
@@ -2264,6 +2382,14 @@ export default function NotebookTab() {
                     onClick={async () => { await manualSyncAll(); setShowSyncMenu(false) }}
                     className="px-2 py-1 rounded text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-left"
                   >同步全部（笔记+附件）</button>
+                  <button
+                    onClick={async () => { await uploadCurrentFile(); setShowSyncMenu(false) }}
+                    className="px-2 py-1 rounded text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-left"
+                  >上传当前（覆盖云端）</button>
+                  <button
+                    onClick={async () => { await downloadCurrentFile(); setShowSyncMenu(false) }}
+                    className="px-2 py-1 rounded text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-left"
+                  >下载当前（覆盖本地）</button>
                   <div className="border-t border-gray-200 my-1" />
                   <button
                     onClick={async () => {
@@ -2277,6 +2403,12 @@ export default function NotebookTab() {
                     }}
                     className={`px-2 py-1 rounded text-xs text-left ${autoOnRefreshSetting ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                   >刷新自动</button>
+                  <button
+                    onClick={async () => {
+                      await useSettingsStore.getState().setSetting(SETTING_KEYS.NOTEBOOK_AUTO_SYNC_ON_SAVE, !autoOnSaveSetting)
+                    }}
+                    className={`px-2 py-1 rounded text-xs text-left ${autoOnSaveSetting ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  >保存自动</button>
                   <button
                     onClick={async () => {
                       const next = !autoSyncAllSetting

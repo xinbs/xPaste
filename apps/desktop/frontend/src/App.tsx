@@ -61,7 +61,6 @@ export default function App() {
             await useAuthStore.getState().fetchDevices();
           } catch (error) {
             console.warn('Failed to fetch devices, clearing current device:', error);
-            useAuthStore.getState().clearStorage();
           }
         }
       }
